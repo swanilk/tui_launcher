@@ -1,0 +1,6 @@
+{
+  "name": "Android Terminal Launcher",
+  "description": "A TUI terminal launcher for Android featuring custom shell commands, themes, syntax highlighting, keyboard navigation, and persistent command history.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
