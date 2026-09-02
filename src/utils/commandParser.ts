@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 
@@ -27,6 +27,8 @@ export interface CommandContext {
   setTodos: (fn: (prev: TodoItem[]) => TodoItem[]) => void;
   contacts: ContactItem[];
   setContacts: (fn: (prev: ContactItem[]) => ContactItem[]) => void;
+  recentCalls: RecentCall[];
+  setRecentCalls: (fn: (prev: RecentCall[]) => RecentCall[]) => void;
   timers: ActiveTimer[];
   setTimers: (fn: (prev: ActiveTimer[]) => ActiveTimer[]) => void;
   history: string[];
@@ -50,6 +52,18 @@ export interface CommandResult {
   content: string;
   metadata?: Record<string, any>;
   clearScreen?: boolean;
+}
+
+export function formatRelativeTime(timestamp: number): string {
+  const diff = Date.now() - timestamp;
+  const secs = Math.floor(diff / 1000);
+  if (secs < 60) return `${Math.max(1, secs)}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
 }
 
 export class CommandParser {
@@ -348,7 +362,13 @@ App '${found.name}' has been uninstalled successfully.`,
       case 'call':
       case 'dial': {
         if (args.length === 0) {
-          const contactHints = ctx.contacts.slice(0, 4).map((c) => `  • call "${c.name}" (${c.phone})`).join('\n');
+          const recentCalls = ctx.recentCalls || [];
+          const recentList = recentCalls.slice(0, 5).map((rc) => {
+            const timeAgo = formatRelativeTime(rc.timestamp);
+            const typeIcon = rc.type === 'missed' ? '🔴 Missed' : rc.type === 'incoming' ? '🔵 Incoming' : '🟢 Outgoing';
+            return `  • call "${rc.name}" (${rc.phone}) — ${typeIcon} • ${timeAgo}`;
+          }).join('\n');
+
           return {
             type: 'output',
             content: `📞 ANDROID PHONE CALL DIALER:
@@ -356,9 +376,11 @@ Usage: call <phone_number | contact_name>
 Examples:
   • call 9614044766
   • call Alex
-${contactHints}
 
-Tip: Type 'call ' in the prompt to view contact autocompletion options.`,
+🕒 RECENT CALLS (Type 'call <name|num>' or select suggestion):
+${recentList || '  (No recent calls logged)'}
+
+Tip: Type 'call ' in prompt to view interactive autocomplete starting with most recent calls!`,
           };
         }
 
@@ -371,11 +393,27 @@ Tip: Type 'call ' in the prompt to view contact autocompletion options.`,
           const phoneClean = c.phone.replace(/[^\d+]/g, '');
           const phoneMatch = cleanQueryNum.length >= 3 && phoneClean.includes(cleanQueryNum);
           return nameMatch || phoneMatch;
+        }) || (ctx.recentCalls || []).find((rc) => {
+          const nameMatch = rc.name.toLowerCase().includes(rawQuery.toLowerCase());
+          const phoneClean = rc.phone.replace(/[^\d+]/g, '');
+          const phoneMatch = cleanQueryNum.length >= 3 && phoneClean.includes(cleanQueryNum);
+          return nameMatch || phoneMatch;
         });
 
-        const targetName = matchedContact ? matchedContact.name : 'Direct Dial';
+        const targetName = matchedContact ? matchedContact.name : (rawQuery.match(/\d/) ? rawQuery : rawQuery);
         const targetPhone = matchedContact ? matchedContact.phone : rawQuery;
         const cleanPhone = targetPhone.replace(/[^\d+*#]/g, '');
+
+        // Log to Recent Calls (newest at top)
+        const newLogEntry: RecentCall = {
+          id: `rc-${Date.now()}`,
+          name: targetName,
+          phone: targetPhone,
+          timestamp: Date.now(),
+          type: 'outgoing',
+          duration: 'Connected',
+        };
+        ctx.setRecentCalls((prev) => [newLogEntry, ...prev.filter((r) => r.phone !== targetPhone)].slice(0, 30));
 
         // Play dialer DTMF tone
         if (ctx.config.soundEnabled) {
@@ -415,6 +453,33 @@ Connecting call... If dialer did not open automatically, tap below.`,
             cleanPhone,
             timestamp: Date.now(),
           },
+        };
+      }
+
+      case 'calls':
+      case 'call-log':
+      case 'recents':
+      case 'recent-calls': {
+        const list = ctx.recentCalls || [];
+        if (list.length === 0) {
+          return { type: 'output', content: '📞 Call Log: No recent calls found.' };
+        }
+        const rows = list.map((rc, idx) => {
+          const typeLabel = rc.type === 'missed' ? '🔴 MISSED' : rc.type === 'incoming' ? '🔵 INCOMING' : '🟢 OUTGOING';
+          const time = new Date(rc.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          const rel = formatRelativeTime(rc.timestamp);
+          return `  ${String(idx + 1).padStart(2, ' ')}. ${rc.name.padEnd(26, ' ')} ${rc.phone.padEnd(16, ' ')} ${typeLabel.padEnd(12, ' ')} ${time} (${rel})`;
+        }).join('\n');
+
+        return {
+          type: 'output',
+          content: `📞 ANDROID RECENT CALL LOG (${list.length} calls):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #   CONTACT NAME               PHONE NUMBER     TYPE         TIME
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${rows}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
         };
       }
 

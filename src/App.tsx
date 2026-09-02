@@ -14,6 +14,7 @@ import {
   NoteItem, 
   TodoItem, 
   ContactItem, 
+  RecentCall,
   ActiveTimer,
   BatteryTelemetry,
   AppNotification
@@ -27,6 +28,7 @@ import {
   DEFAULT_NOTES, 
   DEFAULT_TODOS, 
   DEFAULT_CONTACTS,
+  DEFAULT_RECENT_CALLS,
   DEFAULT_NOTIFICATIONS
 } from './data/defaultData';
 import { StatusBar } from './components/StatusBar';
@@ -187,6 +189,22 @@ export default function App() {
       localStorage.setItem('android_tui_contacts', JSON.stringify(contacts));
     } catch {}
   }, [contacts]);
+
+  // 8b. Persistent Recent Calls
+  const [recentCalls, setRecentCalls] = useState<RecentCall[]>(() => {
+    try {
+      const stored = localStorage.getItem('android_tui_recent_calls');
+      return stored ? JSON.parse(stored) : DEFAULT_RECENT_CALLS;
+    } catch {
+      return DEFAULT_RECENT_CALLS;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('android_tui_recent_calls', JSON.stringify(recentCalls));
+    } catch {}
+  }, [recentCalls]);
 
   // 9. Active Timers
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
@@ -368,6 +386,8 @@ Press [Tab] anytime for auto-completion.`,
         setTodos,
         contacts,
         setContacts,
+        recentCalls,
+        setRecentCalls,
         timers,
         setTimers,
         notifications,
@@ -549,6 +569,7 @@ Press [Tab] anytime for auto-completion.`,
           scripts={scripts}
           aliases={aliases}
           contacts={contacts}
+          recentCalls={recentCalls}
           history={history}
           onSubmit={handleExecuteCommand}
           onClear={() => setLines([])}

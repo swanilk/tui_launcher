@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, VirtualFile, AppNotification } from '../types';
+import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, VirtualFile, AppNotification } from '../types';
 
 export const DEFAULT_CONFIG: LauncherConfig = {
   promptUser: 'u0_a284',
@@ -103,6 +103,48 @@ export const DEFAULT_CONTACTS: ContactItem[] = [
   { id: 'c-3', name: 'Elena Rostova', phone: '+44-20-7946-0912', email: 'elena@matrix.net' },
   { id: 'c-4', name: 'Emergency Support Hotline', phone: '9614044766', email: 'support@android-tui.dev' },
   { id: 'c-5', name: 'DevOps On-Call', phone: '+1-800-555-0199', email: 'ops@terminal.local' },
+];
+
+export const DEFAULT_RECENT_CALLS: RecentCall[] = [
+  {
+    id: 'rc-1',
+    name: 'Emergency Support Hotline',
+    phone: '9614044766',
+    timestamp: Date.now() - 1000 * 60 * 14, // 14 mins ago
+    type: 'outgoing',
+    duration: '1m 42s',
+  },
+  {
+    id: 'rc-2',
+    name: 'Alex Rivera (Dev Lead)',
+    phone: '+1-555-0192',
+    timestamp: Date.now() - 1000 * 60 * 45, // 45 mins ago
+    type: 'incoming',
+    duration: '4m 18s',
+  },
+  {
+    id: 'rc-3',
+    name: 'Dr. Sarah Connor',
+    phone: '+1-555-8392',
+    timestamp: Date.now() - 1000 * 60 * 60 * 3, // 3 hours ago
+    type: 'missed',
+  },
+  {
+    id: 'rc-4',
+    name: 'Elena Rostova',
+    phone: '+44-20-7946-0912',
+    timestamp: Date.now() - 1000 * 60 * 60 * 22, // 22 hours ago
+    type: 'outgoing',
+    duration: '58s',
+  },
+  {
+    id: 'rc-5',
+    name: 'DevOps On-Call',
+    phone: '+1-800-555-0199',
+    timestamp: Date.now() - 1000 * 60 * 60 * 36, // yesterday
+    type: 'incoming',
+    duration: '2m 10s',
+  },
 ];
 
 export const INITIAL_FILESYSTEM: VirtualFile[] = [

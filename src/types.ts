@@ -106,6 +106,15 @@ export interface ContactItem {
   email: string;
 }
 
+export interface RecentCall {
+  id: string;
+  name: string;
+  phone: string;
+  timestamp: number;
+  type: 'incoming' | 'outgoing' | 'missed';
+  duration?: string;
+}
+
 export interface ActiveTimer {
   id: string;
   label: string;

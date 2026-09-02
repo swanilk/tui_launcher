@@ -4,11 +4,22 @@
  */
 
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem } from '../types';
+import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem, RecentCall } from '../types';
 import { tokenizeCommand, KNOWN_COMMANDS } from '../utils/syntaxHighlight';
 import { soundManager } from '../utils/audio';
 import { virtualFS } from '../utils/fileSystem';
-import { Phone, PhoneCall, Terminal, AppWindow, User, Sparkles, Trash2, Play, CornerDownLeft, ArrowRight } from 'lucide-react';
+import { Phone, PhoneCall, Terminal, AppWindow, User, Sparkles, Trash2, Play, CornerDownLeft, ArrowRight, Clock, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
+
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts;
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'Just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 3600000);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 86400000);
+  return `${days}d ago`;
+}
 
 export interface SuggestionItem {
   id: string;
@@ -29,6 +40,7 @@ interface CommandLineProps {
   scripts: CustomScript[];
   aliases: Alias[];
   contacts?: ContactItem[];
+  recentCalls?: RecentCall[];
   history: string[];
   onSubmit: (command: string) => void;
   onClear: () => void;
@@ -43,6 +55,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   scripts,
   aliases,
   contacts = [],
+  recentCalls = [],
   history,
   onSubmit,
   onClear,
@@ -178,33 +191,106 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     if (callMatch) {
       const query = (callMatch[3] ? callMatch[3].trim() : '').toLowerCase();
       const cleanDigits = query.replace(/\D/g, '');
+      const items: SuggestionItem[] = [];
 
-      let matchedContacts = contacts;
-      if (query) {
-        matchedContacts = contacts.filter((c) => {
-          const nameMatches = c.name.toLowerCase().includes(query);
+      if (!query) {
+        // NO INPUT PROVIDED: The inline suggestions MUST start with the MOST RECENT CALLS!
+        const sortedRecent = [...recentCalls].sort((a, b) => b.timestamp - a.timestamp);
+        
+        sortedRecent.slice(0, 7).forEach((rc) => {
+          const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
+          items.push({
+            id: `recent-${rc.id}`,
+            type: 'contact',
+            label: rc.name,
+            subtitle: `🕒 ${formatTimeAgo(rc.timestamp)} • ${rc.phone} [${typeBadge}${rc.duration ? ` • ${rc.duration}` : ''}]`,
+            phoneNumber: rc.phone,
+            value: rc.phone,
+            fullReplacement: `call ${rc.phone}`,
+            actionKind: 'call',
+          });
+        });
+
+        // Add remaining contacts from directory not present in recent calls
+        const recentPhones = new Set(sortedRecent.map((r) => r.phone.replace(/\D/g, '')));
+        const otherContacts = contacts.filter((c) => !recentPhones.has(c.phone.replace(/\D/g, '')));
+        otherContacts.slice(0, 4).forEach((c) => {
+          items.push({
+            id: `contact-${c.id}`,
+            type: 'contact',
+            label: c.name,
+            subtitle: `${c.phone} • Directory`,
+            phoneNumber: c.phone,
+            value: c.phone,
+            fullReplacement: `call ${c.phone}`,
+            actionKind: 'call',
+          });
+        });
+
+        // If typed exactly "call" with no trailing space, offer command helper at the top
+        if (trimmed.toLowerCase() === 'call' || trimmed.toLowerCase() === 'dial') {
+          items.unshift({
+            id: 'cmd-call',
+            type: 'command',
+            label: `${trimmed.toLowerCase()} <number | name>`,
+            subtitle: `Recent Calls & Dialer (${sortedRecent.length} recents available)`,
+            value: `${trimmed.toLowerCase()} `,
+            fullReplacement: `${trimmed.toLowerCase()} `,
+          });
+        }
+      } else {
+        // QUERY PROVIDED: Prioritize matching recent calls first, then contacts
+        const sortedRecent = [...recentCalls].sort((a, b) => b.timestamp - a.timestamp);
+        const matchingRecent = sortedRecent.filter((rc) => {
+          const nameMatches = rc.name.toLowerCase().includes(query);
+          const phoneClean = rc.phone.replace(/\D/g, '');
+          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
+          return nameMatches || phoneMatches;
+        });
+
+        const seenPhones = new Set<string>();
+
+        matchingRecent.forEach((rc) => {
+          seenPhones.add(rc.phone.replace(/\D/g, ''));
+          const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
+          items.push({
+            id: `recent-match-${rc.id}`,
+            type: 'contact',
+            label: rc.name,
+            subtitle: `🕒 Recent (${formatTimeAgo(rc.timestamp)}) • ${rc.phone} [${typeBadge}]`,
+            phoneNumber: rc.phone,
+            value: rc.phone,
+            fullReplacement: `call ${rc.phone}`,
+            actionKind: 'call',
+          });
+        });
+
+        // Match remaining contacts
+        const matchingContacts = contacts.filter((c) => {
           const phoneClean = c.phone.replace(/\D/g, '');
+          if (seenPhones.has(phoneClean)) return false;
+          const nameMatches = c.name.toLowerCase().includes(query);
           const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
           const emailMatches = c.email.toLowerCase().includes(query);
           return nameMatches || phoneMatches || emailMatches;
         });
-      }
 
-      const items: SuggestionItem[] = matchedContacts.slice(0, 8).map((c) => ({
-        id: `contact-${c.id}`,
-        type: 'contact',
-        label: c.name,
-        subtitle: c.phone,
-        phoneNumber: c.phone,
-        value: c.phone,
-        fullReplacement: `call ${c.phone}`,
-        actionKind: 'call',
-      }));
+        matchingContacts.forEach((c) => {
+          seenPhones.add(c.phone.replace(/\D/g, ''));
+          items.push({
+            id: `contact-match-${c.id}`,
+            type: 'contact',
+            label: c.name,
+            subtitle: `${c.phone} • Directory`,
+            phoneNumber: c.phone,
+            value: c.phone,
+            fullReplacement: `call ${c.phone}`,
+            actionKind: 'call',
+          });
+        });
 
-      // If user typed custom digits (like 9614044766) and it's not already in contacts
-      if (cleanDigits.length >= 3) {
-        const hasExact = matchedContacts.some((c) => c.phone.replace(/\D/g) === cleanDigits);
-        if (!hasExact) {
+        // If user typed custom digits and not already an exact match
+        if (cleanDigits.length >= 3 && !seenPhones.has(cleanDigits)) {
           items.unshift({
             id: `direct-dial-${cleanDigits}`,
             type: 'contact',
@@ -216,18 +302,6 @@ export const CommandLine: React.FC<CommandLineProps> = ({
             actionKind: 'call',
           });
         }
-      }
-
-      // If typed exactly "call" with no space yet
-      if (trimmed.toLowerCase() === 'call' || trimmed.toLowerCase() === 'dial') {
-        items.unshift({
-          id: 'cmd-call',
-          type: 'command',
-          label: trimmed.toLowerCase(),
-          subtitle: 'Phone dialer',
-          value: trimmed.toLowerCase(),
-          fullReplacement: `${trimmed.toLowerCase()} `,
-        });
       }
 
       setSuggestions(items);
@@ -318,7 +392,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         setShowSuggestions(false);
       }
     }
-  }, [input, allCandidates, apps, contacts, scripts]);
+  }, [input, allCandidates, apps, contacts, recentCalls, scripts]);
 
   // Compute Inline Ghost Suggestion (Zsh/Fish style)
   const inlineGhostText = useMemo(() => {
@@ -565,7 +639,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   : isUninstallActive
                   ? 'Package Uninstaller • Tap [Uninstall] or [Tab]'
                   : isCallActive
-                  ? 'Contacts Directory • [Tab] Select or Tap 📞'
+                  ? 'Dialer & Recent Calls • [Tab] Complete or Tap [Call]'
                   : 'Inline Suggestions'}
               </span>
             </span>
@@ -576,6 +650,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           <div className="flex flex-wrap sm:flex-col gap-1.5 max-h-52 overflow-y-auto">
             {suggestions.map((item, idx) => {
               const isSelected = idx === selectedSuggestionIdx;
+              const isRecent = item.id.startsWith('recent-') || (item.subtitle && item.subtitle.includes('🕒'));
               const isContact = item.type === 'contact';
               const isApp = item.type === 'app';
               const isUninstall = item.type === 'uninstall';
@@ -600,6 +675,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                       style={{
                         backgroundColor: isUninstall
                           ? `${theme.errorColor}25`
+                          : isRecent
+                          ? `${theme.successColor}35`
                           : isContact
                           ? `${theme.successColor}25`
                           : isApp
@@ -607,6 +684,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           : `${theme.accentColor}25`,
                         color: isUninstall
                           ? theme.errorColor
+                          : isRecent
+                          ? theme.successColor
                           : isContact
                           ? theme.successColor
                           : isApp
@@ -616,6 +695,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                     >
                       {isUninstall ? (
                         <Trash2 size={11} />
+                      ) : isRecent ? (
+                        <Clock size={11} />
                       ) : isContact ? (
                         <User size={11} />
                       ) : isApp ? (
