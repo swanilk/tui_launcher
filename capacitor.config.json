@@ -1,0 +1,8 @@
+{
+  "appId": "com.android.terminal.launcher",
+  "appName": "Android Terminal Launcher",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  }
+}

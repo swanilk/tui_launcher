@@ -30,8 +30,30 @@ jobs:
         run: |
           npm install
           npm run build
-          # Sync web assets into the existing committed Android project
-          npx cap sync android
+
+      - name: Setup Capacitor Android Project
+        run: |
+          # If android directory or gradlew does not exist, cleanly create native project
+          if [ ! -f "android/gradlew" ]; then
+            rm -rf android
+            npx @capacitor/cli add android
+          fi
+          npx @capacitor/cli sync android
+
+      - name: Patch Kotlin stdlib resolution
+        run: |
+          # Ensure no duplicate kotlin-stdlib classes between 1.8+ and legacy jdk7/jdk8
+          cat << 'EOF' >> android/app/build.gradle
+
+          configurations.all {
+              resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+                  if (details.requested.group == 'org.jetbrains.kotlin' && 
+                     (details.requested.name == 'kotlin-stdlib-jdk7' || details.requested.name == 'kotlin-stdlib-jdk8')) {
+                      details.useVersion '1.8.22'
+                  }
+              }
+          }
+          EOF
 
       - name: Build Android APK with Gradle
         run: |
