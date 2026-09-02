@@ -29,17 +29,15 @@ jobs:
       - name: Install Dependencies & Build Web Bundle
         run: |
           npm install
-          npm install @capacitor/core @capacitor/cli @capacitor/android
-          npx cap init "Android Terminal Launcher" "com.android.terminal.launcher" --web-dir "dist"
           npm run build
-          npx cap add android
-          npx cap copy android
+          # Sync web assets into the existing committed Android project
+          npx cap sync android
 
       - name: Build Android APK with Gradle
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload Generated APK Artifact
         uses: actions/upload-artifact@v4
