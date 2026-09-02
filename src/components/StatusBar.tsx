@@ -29,7 +29,7 @@ interface StatusBarProps {
   onToggleCrt: () => void;
   onOpenThemeModal: () => void;
   onOpenAppLauncher: () => void;
-  onOpenApkModal: () => void;
+  onOpenNotifications?: () => void;
   onOpenBatteryModal?: () => void;
 }
 
@@ -44,7 +44,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onToggleCrt,
   onOpenThemeModal,
   onOpenAppLauncher,
-  onOpenApkModal,
+  onOpenNotifications,
   onOpenBatteryModal,
 }) => {
   const [timeStr, setTimeStr] = useState('');
@@ -103,14 +103,14 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </button>
 
         <button
-          id="btn-quick-apk"
-          onClick={onOpenApkModal}
-          title="Compile & Export Android 16 APK"
+          id="btn-quick-notifs"
+          onClick={onOpenNotifications}
+          title="View Tabular Notifications (cmd: notifications)"
           className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border font-bold"
           style={{ borderColor: theme.promptColor, backgroundColor: `${theme.promptColor}20`, color: theme.promptColor }}
         >
           <Terminal size={11} />
-          <span>APK</span>
+          <span>Notifs</span>
         </button>
 
         <button

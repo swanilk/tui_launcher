@@ -16,7 +16,7 @@ interface TouchToolbarProps {
   onOpenApps: () => void;
   onOpenThemes: () => void;
   onOpenHelp: () => void;
-  onOpenApk?: () => void;
+  onOpenNotifications?: () => void;
   onOpenBattery?: () => void;
 }
 
@@ -28,7 +28,7 @@ export const TouchToolbar: React.FC<TouchToolbarProps> = ({
   onOpenApps,
   onOpenThemes,
   onOpenHelp,
-  onOpenApk,
+  onOpenNotifications,
   onOpenBattery,
 }) => {
   const handleKeyClick = (keyVal: string) => {
@@ -41,7 +41,7 @@ export const TouchToolbar: React.FC<TouchToolbarProps> = ({
   const quickKeys = [
     { label: 'ESC', action: () => handleKeyClick('Escape') },
     { label: 'TAB', action: () => handleKeyClick('Tab'), highlight: true },
-    { label: 'APK', action: onOpenApk || (() => onKeyPress('apk build')), highlight: true },
+    { label: 'Notif', action: onOpenNotifications || (() => onKeyPress('notifications')), highlight: true },
     { label: 'BAT', action: onOpenBattery || (() => onKeyPress('battery monitor')), highlight: false },
     { label: '↑', action: () => handleKeyClick('ArrowUp'), icon: <ArrowUp size={12} /> },
     { label: '↓', action: () => handleKeyClick('ArrowDown'), icon: <ArrowDown size={12} /> },

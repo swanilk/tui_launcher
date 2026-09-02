@@ -15,7 +15,8 @@ import {
   TodoItem, 
   ContactItem, 
   ActiveTimer,
-  BatteryTelemetry
+  BatteryTelemetry,
+  AppNotification
 } from './types';
 import { DEFAULT_THEMES } from './data/themes';
 import { DEFAULT_APPS } from './data/defaultApps';
@@ -25,7 +26,8 @@ import {
   DEFAULT_SCRIPTS, 
   DEFAULT_NOTES, 
   DEFAULT_TODOS, 
-  DEFAULT_CONTACTS 
+  DEFAULT_CONTACTS,
+  DEFAULT_NOTIFICATIONS
 } from './data/defaultData';
 import { StatusBar } from './components/StatusBar';
 import { CommandLine } from './components/CommandLine';
@@ -35,7 +37,6 @@ import { AppViewerModal } from './components/AppViewerModal';
 import { NanoEditor } from './components/NanoEditor';
 import { HistorySearchModal } from './components/HistorySearchModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
-import { ApkCompilerModal } from './components/ApkCompilerModal';
 import { BatteryMonitorModal } from './components/BatteryMonitorModal';
 import { MatrixScreen } from './components/MatrixScreen';
 import { HighDensityHud } from './components/HighDensityHud';
@@ -90,6 +91,22 @@ export default function App() {
       localStorage.setItem('android_tui_apps', JSON.stringify(apps));
     } catch {}
   }, [apps]);
+
+  // Persistent Notifications
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => {
+    try {
+      const stored = localStorage.getItem('android_tui_notifications');
+      return stored ? JSON.parse(stored) : DEFAULT_NOTIFICATIONS;
+    } catch {
+      return DEFAULT_NOTIFICATIONS;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('android_tui_notifications', JSON.stringify(notifications));
+    } catch {}
+  }, [notifications]);
 
   // 4. Persistent Aliases
   const [aliases, setAliases] = useState<Alias[]>(() => {
@@ -214,7 +231,6 @@ Press [Tab] anytime for auto-completion.`,
   const [activeNanoModal, setActiveNanoModal] = useState<{ filename: string; content: string } | null>(null);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
-  const [isApkModalOpen, setIsApkModalOpen] = useState(false);
   const [isBatteryModalOpen, setIsBatteryModalOpen] = useState(false);
   const [isMatrixActive, setIsMatrixActive] = useState(false);
 
@@ -354,6 +370,8 @@ Press [Tab] anytime for auto-completion.`,
         setContacts,
         timers,
         setTimers,
+        notifications,
+        setNotifications,
         history,
         clearHistory: () => setHistory([]),
         clearTerminal: () => setLines([]),
@@ -361,7 +379,6 @@ Press [Tab] anytime for auto-completion.`,
         openNanoModal: (filename: string, content: string) => setActiveNanoModal({ filename, content }),
         openThemeModal: () => setIsThemeModalOpen(true),
         openHistoryModal: () => setIsHistoryModalOpen(true),
-        openApkCompilerModal: () => setIsApkModalOpen(true),
         openBatteryModal: () => setIsBatteryModalOpen(true),
         togglePowerSaver: () => setPowerSaver((p) => !p),
         setMatrixActive: (active: boolean) => setIsMatrixActive(active),
@@ -411,7 +428,6 @@ Press [Tab] anytime for auto-completion.`,
       setActiveNanoModal(null);
       setIsThemeModalOpen(false);
       setIsHistoryModalOpen(false);
-      setIsApkModalOpen(false);
       setIsBatteryModalOpen(false);
       setIsMatrixActive(false);
       return;
@@ -479,7 +495,7 @@ Press [Tab] anytime for auto-completion.`,
           onToggleCrt={() => setConfig((prev) => ({ ...prev, crtEffect: !prev.crtEffect }))}
           onOpenThemeModal={() => setIsThemeModalOpen(true)}
           onOpenAppLauncher={() => handleExecuteCommand('apps')}
-          onOpenApkModal={() => setIsApkModalOpen(true)}
+          onOpenNotifications={() => handleExecuteCommand('notifications')}
           onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
         />
       )}
@@ -507,6 +523,7 @@ Press [Tab] anytime for auto-completion.`,
           theme={currentTheme}
           apps={apps}
           aliases={aliases}
+          notifications={notifications}
           onOpenApp={(app) => {
             if (app.launchAction === 'command' && app.commandToRun) {
               handleExecuteCommand(app.commandToRun);
@@ -515,7 +532,6 @@ Press [Tab] anytime for auto-completion.`,
             }
           }}
           onRunCommand={handleExecuteCommand}
-          onOpenApkModal={() => setIsApkModalOpen(true)}
           onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
           batteryLevel={batteryLevel}
           isCharging={isCharging}
@@ -550,7 +566,7 @@ Press [Tab] anytime for auto-completion.`,
             onOpenApps={() => handleExecuteCommand('apps')}
             onOpenThemes={() => setIsThemeModalOpen(true)}
             onOpenHelp={() => handleExecuteCommand('help')}
-            onOpenApk={() => setIsApkModalOpen(true)}
+            onOpenNotifications={() => handleExecuteCommand('notifications')}
             onOpenBattery={() => setIsBatteryModalOpen(true)}
           />
         )}
@@ -620,15 +636,6 @@ Press [Tab] anytime for auto-completion.`,
           onSelectTheme={(themeId) => setConfig((prev) => ({ ...prev, activeThemeId: themeId }))}
           onUpdateConfig={setConfig}
           onClose={() => setIsThemeModalOpen(false)}
-        />
-      )}
-
-      {/* Android 16 APK Compiler & Packaging Suite */}
-      {isApkModalOpen && (
-        <ApkCompilerModal
-          theme={currentTheme}
-          onClose={() => setIsApkModalOpen(false)}
-          soundEnabled={config.soundEnabled}
         />
       )}
 

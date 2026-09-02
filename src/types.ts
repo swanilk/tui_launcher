@@ -25,10 +25,24 @@ export interface Theme {
   crtFlicker?: boolean;
 }
 
+export interface AppNotification {
+  id: string;
+  appId: string;
+  appName: string;
+  packageName: string;
+  title: string;
+  message: string;
+  timestamp: number;
+  priority?: 'low' | 'normal' | 'high' | 'urgent';
+  actionCommand?: string;
+  actionLabel?: string;
+  read?: boolean;
+}
+
 export interface TerminalLine {
   id: string;
   timestamp: number;
-  type: 'input' | 'output' | 'error' | 'success' | 'system' | 'table' | 'ascii' | 'help' | 'weather' | 'app_list';
+  type: 'input' | 'output' | 'error' | 'success' | 'system' | 'table' | 'ascii' | 'help' | 'weather' | 'app_list' | 'notifications_grouped';
   prompt?: string;
   command?: string;
   content: string;
@@ -54,6 +68,7 @@ export interface AndroidApp {
   commandToRun?: string;
   favorite?: boolean;
   hidden?: boolean;
+  lastUsed?: number;
 }
 
 export interface CustomScript {

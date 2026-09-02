@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, VirtualFile } from '../types';
+import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, VirtualFile, AppNotification } from '../types';
 
 export const DEFAULT_CONFIG: LauncherConfig = {
   promptUser: 'u0_a284',
@@ -210,4 +210,79 @@ export const INITIAL_FILESYSTEM: VirtualFile[] = [
       }
     ]
   }
+];
+
+export const DEFAULT_NOTIFICATIONS: AppNotification[] = [
+  {
+    id: 'notif-battery-1',
+    appId: 'settings',
+    appName: 'Battery & Power',
+    packageName: 'com.android.settings.fuelgauge',
+    title: 'Adaptive Battery Optimizer',
+    message: 'Background power restriction applied to 4 idle tasks. +1h 45m battery saved.',
+    timestamp: Date.now() - 1000 * 60 * 42,
+    priority: 'low',
+    actionCommand: 'battery monitor',
+    actionLabel: 'Battery Telemetry',
+  },
+  {
+    id: 'notif-system-1',
+    appId: 'settings',
+    appName: 'Android Settings',
+    packageName: 'com.android.settings',
+    title: 'Security Patch Level',
+    message: 'September 2026 Android 16 Baklava security bulletin verified (0 vulnerabilities).',
+    timestamp: Date.now() - 1000 * 60 * 25,
+    priority: 'normal',
+    actionCommand: 'open settings',
+    actionLabel: 'Settings',
+  },
+  {
+    id: 'notif-phone-1',
+    appId: 'phone',
+    appName: 'Phone',
+    packageName: 'com.android.dialer',
+    title: 'Missed Call',
+    message: 'Alex Rivera (+1-555-0192) - 2 rings (VoLTE HD Voice)',
+    timestamp: Date.now() - 1000 * 60 * 18,
+    priority: 'high',
+    actionCommand: 'call Alex',
+    actionLabel: 'Call Back',
+  },
+  {
+    id: 'notif-terminal-1',
+    appId: 'terminal',
+    appName: 'Termux TUI Core',
+    packageName: 'com.termux',
+    title: 'Cron Job Completed',
+    message: 'Scheduled backup synced /home/u0_a284/scripts (3 files, 0 errors).',
+    timestamp: Date.now() - 1000 * 60 * 12,
+    priority: 'normal',
+    actionCommand: 'open terminal',
+    actionLabel: 'View Shell',
+  },
+  {
+    id: 'notif-weather-1',
+    appId: 'weather',
+    appName: 'Weather',
+    packageName: 'com.android.weather',
+    title: 'Precipitation Alert',
+    message: 'Scattered light showers expected in 45 minutes (18°C / 64°F, 65% humidity).',
+    timestamp: Date.now() - 1000 * 60 * 6,
+    priority: 'normal',
+    actionCommand: 'weather Tokyo',
+    actionLabel: 'Radar Map',
+  },
+  {
+    id: 'notif-msg-1',
+    appId: 'messages',
+    appName: 'Messages',
+    packageName: 'com.android.mms',
+    title: 'Dr. Sarah Connor',
+    message: 'Server migration completed. Ready for security audit on port 3000.',
+    timestamp: Date.now() - 1000 * 60 * 2,
+    priority: 'urgent',
+    actionCommand: 'open messages',
+    actionLabel: 'Open Chat',
+  },
 ];

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, ActiveTimer, Theme, BatteryTelemetry } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 
@@ -15,6 +15,8 @@ export interface CommandContext {
   setThemeId: (id: string) => void;
   apps: AndroidApp[];
   setApps: (fn: (prev: AndroidApp[]) => AndroidApp[]) => void;
+  notifications: AppNotification[];
+  setNotifications: (fn: (prev: AppNotification[]) => AppNotification[]) => void;
   aliases: Alias[];
   setAliases: (fn: (prev: Alias[]) => Alias[]) => void;
   scripts: CustomScript[];
@@ -34,7 +36,6 @@ export interface CommandContext {
   openNanoModal: (filename: string, content: string) => void;
   openThemeModal: () => void;
   openHistoryModal: () => void;
-  openApkCompilerModal?: () => void;
   openBatteryModal?: () => void;
   togglePowerSaver?: () => void;
   setMatrixActive: (active: boolean) => void;
@@ -45,7 +46,7 @@ export interface CommandContext {
 }
 
 export interface CommandResult {
-  type: 'output' | 'error' | 'success' | 'system' | 'table' | 'ascii' | 'help' | 'weather' | 'app_list';
+  type: 'output' | 'error' | 'success' | 'system' | 'table' | 'ascii' | 'help' | 'weather' | 'app_list' | 'notifications_grouped';
   content: string;
   metadata?: Record<string, any>;
   clearScreen?: boolean;
@@ -237,6 +238,11 @@ Tip: You can also type the app name directly (e.g. 'camera') or type 'open ' for
         );
 
         if (found) {
+          // Update lastUsed timestamp so app moves to top of Recently Used
+          ctx.setApps((prev) =>
+            prev.map((a) => (a.id === found.id ? { ...a, lastUsed: Date.now() } : a))
+          );
+
           if (found.launchAction === 'command' && found.commandToRun) {
             return this.executeSingle(found.commandToRun, ctx);
           }
@@ -675,76 +681,32 @@ Connecting call... If dialer did not open automatically, tap below.`,
         return this.handleContacts(args, ctx);
       }
 
-      // 18. SYSTEM UTILITIES & ANDROID 16 APK COMPILER
+      // 18. NOTIFICATIONS SHADE (TABULAR, GROUPED & SEGREGATED BY APP)
+      case 'notifications':
+      case 'notification':
+      case 'notifs':
+      case 'notif':
+      case 'notify':
+      case 'alerts':
+      case 'alert': {
+        return this.handleNotifications(args, ctx);
+      }
+
+      // Deprecated APK builder command notification
       case 'apk':
       case 'compile':
       case 'build-apk':
       case 'package':
       case 'export-apk': {
-        const sub = args[0]?.toLowerCase() || 'build';
-        if (sub === 'where' || sub === 'locate' || sub === 'path' || sub === 'find' || sub === 'file' || sub === 'files') {
-          return {
-            type: 'output',
-            content: `📦 ANDROID 16 APK FILE LOCATIONS & ARTIFACT DIRECTORY:
-======================================================================
-1. 🌐 Local Browser Downloads Directory:
-   • File:     Downloads/AndroidTerminalLauncher-v16.0.0-release.apk
-   • Size:     ~874 KB (Android 16 API 36 Baklava, V3 Signed)
-   • How to Get: Click [Download APK Bundle] in the APK Compiler Modal
-                 or run: 'apk download'
-
-2. 📁 Virtual Terminal Filesystem Paths:
-   • ~/dist/AndroidTerminalLauncher-v16.0.0-release.apk
-   • /sdcard/Download/AndroidTerminalLauncher-v16.0.0-release.apk
-   • Inspect:  ls ~/dist   or   ls /sdcard/Download
-
-3. ⚡ Android Sideloading Command (via ADB):
-   • adb install -r AndroidTerminalLauncher-v16.0.0-release.apk
-======================================================================
-Tip: Run 'apk' or 'apk download' to open the compiler and export the APK bundle!`,
-          };
-        }
-
-        if (sub === 'download' || sub === 'export' || sub === 'save') {
-          if (ctx.openApkCompilerModal) {
-            ctx.openApkCompilerModal();
-          }
-          return {
-            type: 'success',
-            content: `🚀 Triggering Android 16 APK Build & Export Pipeline...\nOpening APK modal. Click 'Download APK Bundle' to save the .apk binary directly!`,
-          };
-        }
-
-        if (sub === 'info' || sub === 'specs') {
-          return {
-            type: 'output',
-            content: `🤖 Android 16 (API 36 Baklava) APK Specification:
-  • Package Name:     com.android.terminal.launcher
-  • Target SDK:       36 (Android 16 Baklava)
-  • Min SDK:          26 (Android 8.0 Oreo)
-  • Architecture:     aarch64 / arm64-v8a (16KB Page Aligned)
-  • Edge-to-Edge:     Enacted (Zero system bar letterboxing)
-  • Predictive Back:  Enabled (android:enableOnBackInvokedCallback="true")
-  • Signing Scheme:   APK Signature Scheme v3 + v2
-  • Category:         android.intent.category.HOME (Launcher)
-  
-To build and generate APK binary package, run: 'apk build' or 'apk download'`,
-          };
-        }
-
-        if (sub === 'sign' || sub === 'verify') {
-          return {
-            type: 'success',
-            content: `[✓] APK Signature Verified (V3 Scheme):\n  Digest: SHA-256 (Android 16 Secure Boot)\n  Signer: CN=AndroidTerminal, OU=Production, O=TUI\n  Status: VALID_FOR_SIDELOADING`,
-          };
-        }
-
-        if (ctx.openApkCompilerModal) {
-          ctx.openApkCompilerModal();
-        }
         return {
-          type: 'success',
-          content: `🚀 Initialized Android 16 APK Compilation & Packaging Pipeline...\nOpening Interactive Compiler Suite. You can download the generated APK directly!`,
+          type: 'output',
+          content: `📱 ANDROID TERMINAL LAUNCHER:
+  The terminal launcher is actively running in its full native interactive TUI environment.
+  APK Builder has been streamlined into direct native execution.
+  
+  • To view or launch apps: type 'apps' or 'open <app>'
+  • To check app notifications: type 'notifications' or 'notifs'
+  • To inspect power status: type 'battery' or 'battery monitor'`,
         };
       }
 
@@ -947,6 +909,11 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
                  a.packageName.toLowerCase() === command
         );
         if (app) {
+          // Update lastUsed timestamp so app moves to top of Recently Used
+          ctx.setApps((prev) =>
+            prev.map((a) => (a.id === app.id ? { ...a, lastUsed: Date.now() } : a))
+          );
+
           if (app.launchAction === 'command' && app.commandToRun) {
             return this.executeSingle(app.commandToRun, ctx);
           }
@@ -992,8 +959,9 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
     if (args.length > 0) {
       const topic = args[0].toLowerCase();
       const docs: Record<string, string> = {
-        apps: 'apps [-a | -f | -s <query>]\nList installed apps, filter favorites (-f), or search (-s). You can launch apps with "open <name>" or by typing the app name directly. To uninstall: "uninstall <name>".',
+        apps: 'apps [-a | -f | -s <query>]\nList installed apps with recent apps at top and inbuilt scroll. You can launch apps with "open <name>" or by typing the app name directly. To uninstall: "uninstall <name>".',
         open: 'open <app_name | url | package>\nLaunch simulated Android applications or external web URLs. You can also type the app name directly (e.g. "camera", "spotify").',
+        notifications: 'notifications [ls | clear | test | send <app> <msg>]\nView grouped, segregated clickable notifications in tabular single-line format. The app with the most recent notification displays at the bottom-most.',
         uninstall: 'uninstall <app_name | package_name>\nUninstall an application package and reclaim storage space. Synonyms: remove-app, pm uninstall, pkg uninstall.',
         alias: 'alias [name=\'command\']\nCreate custom shortcuts. Example: alias ll=\'ls -la\'\nTo remove an alias, use: unalias <name>',
         theme: 'theme [theme_name | ls]\nSwitch active theme or preview 12+ aesthetic TUI themes including Matrix CRT, Cyberpunk 2077, Dracula, Gruvbox, and Amber Phosphor.',
@@ -1004,7 +972,6 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
         weather: 'weather [city]\nView current atmospheric conditions, temperature, humidity, wind, and forecast in ASCII art.',
         neofetch: 'neofetch\nDisplay system architecture, Android OS build, memory usage, battery metrics, and ASCII logo.',
         battery: 'battery [status | monitor | graph | top | saver | health | calibrate]\nHardware battery telemetry monitor. Type "battery monitor" to open interactive GUI, "battery graph" for 24h discharge curve, or "battery saver" to toggle low power mode.',
-        apk: 'apk [build | download | where | info | sign]\nAndroid 16 (API 36 Baklava) APK Compiler and packaging suite. Type "apk download" or "apk where" to locate and export generated .apk binaries.',
       };
 
       if (docs[topic]) {
@@ -1022,9 +989,10 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
 ╚════════════════════════════════════════════════════════════════════════╝
 
 🚀 CORE APP & NAVIGATION COMMANDS:
-  apps [-a|-f|-s]       List apps, favorites (-f), or search (-s)
+  apps [-a|-f|-s]       List apps (recent apps on top, scrollable)
   open <app|url>        Launch Android app modal or web browser
-  apk / compile         Compile & package Android 16 native APK bundle
+  uninstall <app>       Uninstall app package
+  notifications / notifs Grouped tabular notifications shade
   call <num|name>       Simulated phone dialer
   sms <num> <msg>       Send text message
   search / google <q>   Search Google, DuckDuckGo (ddg), or YouTube (yt)
@@ -1060,6 +1028,77 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
     };
   }
 
+  private static handleNotifications(args: string[], ctx: CommandContext): CommandResult {
+    const sub = args[0]?.toLowerCase();
+
+    if (sub === 'clear' || sub === 'dismiss' || sub === 'rm') {
+      const targetApp = args.slice(1).join(' ').toLowerCase();
+      if (targetApp) {
+        ctx.setNotifications((prev) =>
+          prev.filter((n) => n.appId.toLowerCase() !== targetApp && n.appName.toLowerCase() !== targetApp)
+        );
+        return { type: 'success', content: `[✓] Cleared notifications for '${targetApp}'.` };
+      }
+      ctx.setNotifications(() => []);
+      return { type: 'success', content: '[✓] Cleared all notification shade alerts.' };
+    }
+
+    if (sub === 'test' || sub === 'simulate' || sub === 'mock') {
+      const apps = ctx.apps.length > 0 ? ctx.apps : [];
+      const randomApp = apps[Math.floor(Math.random() * apps.length)] || { id: 'termux', name: 'Termux', packageName: 'com.termux' };
+      const newNotif: AppNotification = {
+        id: `notif-test-${Date.now()}`,
+        appId: randomApp.id,
+        appName: randomApp.name,
+        packageName: randomApp.packageName,
+        title: `Alert from ${randomApp.name}`,
+        message: `Interactive background event dispatched at ${new Date().toLocaleTimeString()} (Priority: HIGH).`,
+        timestamp: Date.now(),
+        priority: 'high',
+        actionCommand: `open ${randomApp.name}`,
+        actionLabel: 'Launch App',
+      };
+      ctx.setNotifications((prev) => [...prev, newNotif]);
+      return {
+        type: 'success',
+        content: `[✓] Dispatched new notification from ${randomApp.name}. It will appear at the bottom-most position in 'notifications'.`,
+      };
+    }
+
+    if (sub === 'send' || sub === 'add') {
+      const appTarget = args[1];
+      const message = args.slice(2).join(' ');
+      if (!appTarget || !message) {
+        return { type: 'error', content: 'Usage: notify send <app_name> <message>' };
+      }
+      const matchedApp = ctx.apps.find(
+        (a) => a.name.toLowerCase() === appTarget.toLowerCase() || a.id.toLowerCase() === appTarget.toLowerCase()
+      );
+      const newNotif: AppNotification = {
+        id: `notif-custom-${Date.now()}`,
+        appId: matchedApp ? matchedApp.id : appTarget.toLowerCase(),
+        appName: matchedApp ? matchedApp.name : appTarget,
+        packageName: matchedApp ? matchedApp.packageName : `com.custom.${appTarget.toLowerCase()}`,
+        title: `Message from ${matchedApp ? matchedApp.name : appTarget}`,
+        message,
+        timestamp: Date.now(),
+        priority: 'normal',
+        actionCommand: matchedApp ? `open ${matchedApp.name}` : undefined,
+        actionLabel: 'View',
+      };
+      ctx.setNotifications((prev) => [...prev, newNotif]);
+      return { type: 'success', content: `[✓] Notification posted for ${newNotif.appName}.` };
+    }
+
+    return {
+      type: 'notifications_grouped',
+      content: `Active Notifications (${ctx.notifications.length} total)`,
+      metadata: {
+        notifications: ctx.notifications,
+      },
+    };
+  }
+
   private static handleApps(args: string[], ctx: CommandContext): CommandResult {
     const firstArg = args[0]?.toLowerCase();
     if (firstArg === 'uninstall' || firstArg === 'remove' || firstArg === 'rm') {
@@ -1082,6 +1121,9 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
       const target = args.slice(1).join(' ').toLowerCase();
       const found = ctx.apps.find((a) => a.name.toLowerCase().includes(target));
       if (found) {
+        ctx.setApps((prev) =>
+          prev.map((a) => (a.id === found.id ? { ...a, lastUsed: Date.now() } : a))
+        );
         ctx.openAppModal(found);
         return { type: 'success', content: `[✓] Launching ${found.name}...` };
       }
