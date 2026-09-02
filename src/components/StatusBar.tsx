@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Theme, LauncherConfig } from '../types';
+import { Theme, LauncherConfig, BluetoothState } from '../types';
 import { 
   Wifi, 
   Battery, 
@@ -15,7 +15,10 @@ import {
   Palette, 
   Terminal,
   Grid,
-  Clock
+  Clock,
+  Bluetooth,
+  BluetoothConnected,
+  BluetoothOff
 } from 'lucide-react';
 
 interface StatusBarProps {
@@ -25,6 +28,7 @@ interface StatusBarProps {
   isCharging: boolean;
   powerSaver?: boolean;
   wifiSsid: string;
+  bluetoothState?: BluetoothState;
   onToggleSound: () => void;
   onToggleCrt: () => void;
   onOpenThemeModal: () => void;
@@ -40,6 +44,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   isCharging,
   powerSaver,
   wifiSsid,
+  bluetoothState,
   onToggleSound,
   onToggleCrt,
   onOpenThemeModal,
@@ -130,6 +135,47 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         <span className="hidden xl:inline opacity-70 text-[10px]">
           MEM: 4.2GB / 8GB
         </span>
+
+        {/* Bluetooth Telemetry Indicator */}
+        {bluetoothState && (
+          <div 
+            id="btn-status-bluetooth"
+            className="hidden sm:flex items-center gap-1 px-1.5 py-0.5 text-[10px] sm:text-[11px] font-bold rounded border"
+            style={{
+              borderColor: bluetoothState.enabled 
+                ? (bluetoothState.devices.some(d => d.connected) ? `${theme.infoColor}60` : `${theme.borderColor}`)
+                : `${theme.errorColor}40`,
+              backgroundColor: bluetoothState.enabled 
+                ? (bluetoothState.devices.some(d => d.connected) ? `${theme.infoColor}15` : 'transparent')
+                : `${theme.errorColor}10`,
+              color: bluetoothState.enabled 
+                ? (bluetoothState.devices.some(d => d.connected) ? theme.infoColor : theme.fg)
+                : theme.errorColor,
+            }}
+            title={bluetoothState.enabled 
+              ? `Bluetooth Enabled • ${bluetoothState.devices.filter(d => d.connected).length} Connected`
+              : 'Bluetooth Disabled'}
+          >
+            {!bluetoothState.enabled ? (
+              <>
+                <BluetoothOff size={11} className="opacity-70" />
+                <span>BT: OFF</span>
+              </>
+            ) : bluetoothState.devices.some(d => d.connected) ? (
+              <>
+                <BluetoothConnected size={11} className="text-cyan-400 animate-pulse" />
+                <span className="truncate max-w-[90px]">
+                  {bluetoothState.devices.find(d => d.connected)?.name.split(' ')[0] || 'BT: ON'}
+                </span>
+              </>
+            ) : (
+              <>
+                <Bluetooth size={11} />
+                <span>BT: ON</span>
+              </>
+            )}
+          </div>
+        )}
 
         {/* Battery Telemetry (Interactive Monitor Trigger) */}
         <button

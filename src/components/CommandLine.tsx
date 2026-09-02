@@ -4,11 +4,31 @@
  */
 
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem, RecentCall } from '../types';
+import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem, RecentCall, BluetoothDevice, BluetoothState } from '../types';
 import { tokenizeCommand, KNOWN_COMMANDS } from '../utils/syntaxHighlight';
 import { soundManager } from '../utils/audio';
 import { virtualFS } from '../utils/fileSystem';
-import { Phone, PhoneCall, Terminal, AppWindow, User, Sparkles, Trash2, Play, CornerDownLeft, ArrowRight, Clock, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
+import { 
+  Phone, 
+  PhoneCall, 
+  Terminal, 
+  AppWindow, 
+  User, 
+  Sparkles, 
+  Trash2, 
+  Play, 
+  CornerDownLeft, 
+  ArrowRight, 
+  Clock, 
+  PhoneIncoming, 
+  PhoneOutgoing, 
+  PhoneMissed,
+  Bluetooth,
+  BluetoothConnected,
+  BluetoothOff,
+  BluetoothSearching,
+  Power
+} from 'lucide-react';
 
 function formatTimeAgo(ts: number): string {
   const diff = Date.now() - ts;
@@ -23,14 +43,15 @@ function formatTimeAgo(ts: number): string {
 
 export interface SuggestionItem {
   id: string;
-  type: 'app' | 'command' | 'contact' | 'file' | 'theme' | 'uninstall' | 'subcommand';
+  type: 'app' | 'command' | 'contact' | 'file' | 'theme' | 'uninstall' | 'subcommand' | 'bluetooth';
   label: string;
   value: string;
   fullReplacement?: string;
   subtitle?: string;
   phoneNumber?: string;
   appObj?: AndroidApp;
-  actionKind?: 'open' | 'uninstall' | 'call' | 'exec';
+  bluetoothDevice?: BluetoothDevice;
+  actionKind?: 'open' | 'uninstall' | 'call' | 'exec' | 'bluetooth_connect' | 'bluetooth_toggle';
 }
 
 interface CommandLineProps {
@@ -41,6 +62,7 @@ interface CommandLineProps {
   aliases: Alias[];
   contacts?: ContactItem[];
   recentCalls?: RecentCall[];
+  bluetoothState?: BluetoothState;
   history: string[];
   onSubmit: (command: string) => void;
   onClear: () => void;
@@ -56,6 +78,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   aliases,
   contacts = [],
   recentCalls = [],
+  bluetoothState,
   history,
   onSubmit,
   onClear,
@@ -310,6 +333,195 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       return;
     }
 
+    // 4. Check if user is typing a bluetooth command: "bluetooth", "bt", "bluetoothctl", "bluez"
+    const btMatch = trimmed.match(/^(bluetooth|bt|bluetoothctl|bluez)(\s+(.*))?$/i);
+    if (btMatch) {
+      const btCmd = btMatch[1].toLowerCase();
+      const rest = (btMatch[3] ? btMatch[3].trim() : '').toLowerCase();
+      const devices = bluetoothState?.devices || [];
+      const isEnabled = bluetoothState?.enabled ?? true;
+      const items: SuggestionItem[] = [];
+
+      const getDeviceSubtitle = (d: BluetoothDevice) => {
+        const status = d.connected ? '● CONNECTED' : d.paired ? '○ PAIRED' : '◌ AVAILABLE';
+        const typeStr = d.type.toUpperCase();
+        const bat = d.battery !== undefined ? ` • 🔋${d.battery}%` : '';
+        const codec = d.codec ? ` • ${d.codec}` : '';
+        const rssi = ` • ${d.rssi}dBm`;
+        return `${status} • ${d.mac} • ${typeStr}${bat}${codec}${rssi}`;
+      };
+
+      // Case 4A: User is typing "bluetooth connect" or "bt connect" (with or without a device search query)
+      const connectMatch = trimmed.match(/^(bluetooth|bt|bluetoothctl|bluez)\s+connect(\s+(.*))?$/i);
+      if (connectMatch) {
+        const query = (connectMatch[3] ? connectMatch[3].trim() : '').toLowerCase();
+
+        // Filter and sort: connected & paired devices first, then available nearby devices
+        const matchedDevices = devices.filter((d) => {
+          if (!query) return true;
+          return (
+            d.name.toLowerCase().includes(query) ||
+            d.mac.toLowerCase().includes(query) ||
+            d.type.toLowerCase().includes(query)
+          );
+        });
+
+        // Sort: connected -> paired -> available
+        const sorted = [...matchedDevices].sort((a, b) => {
+          if (a.connected && !b.connected) return -1;
+          if (!a.connected && b.connected) return 1;
+          if (a.paired && !b.paired) return -1;
+          if (!a.paired && b.paired) return 1;
+          return 0;
+        });
+
+        sorted.forEach((d) => {
+          const isQuoted = d.name.includes(' ') ? `"${d.name}"` : d.name;
+          items.push({
+            id: `bt-dev-${d.id}`,
+            type: 'bluetooth',
+            label: d.name,
+            subtitle: getDeviceSubtitle(d),
+            value: isQuoted,
+            fullReplacement: `${btCmd} connect ${isQuoted}`,
+            bluetoothDevice: d,
+            actionKind: 'bluetooth_connect',
+          });
+        });
+
+        if (!query) {
+          items.unshift({
+            id: 'cmd-bt-connect-help',
+            type: 'command',
+            label: `${btCmd} connect <device_name>`,
+            subtitle: `Connect to Paired or Available Bluetooth Audio/Peripherals (${devices.length} devices)`,
+            value: `${btCmd} connect `,
+            fullReplacement: `${btCmd} connect `,
+          });
+        }
+
+        setSuggestions(items);
+        setSelectedSuggestionIdx(0);
+        setShowSuggestions(items.length > 0);
+        return;
+      }
+
+      // Case 4B: User is typing "bluetooth disconnect"
+      const disconnectMatch = trimmed.match(/^(bluetooth|bt|bluetoothctl|bluez)\s+disconnect(\s+(.*))?$/i);
+      if (disconnectMatch) {
+        const query = (disconnectMatch[3] ? disconnectMatch[3].trim() : '').toLowerCase();
+        const connectedDevices = devices.filter((d) => d.connected);
+
+        connectedDevices
+          .filter((d) => !query || d.name.toLowerCase().includes(query) || d.mac.toLowerCase().includes(query))
+          .forEach((d) => {
+            const isQuoted = d.name.includes(' ') ? `"${d.name}"` : d.name;
+            items.push({
+              id: `bt-disconn-${d.id}`,
+              type: 'bluetooth',
+              label: d.name,
+              subtitle: `Active Link • ${d.mac} • ${d.battery !== undefined ? `🔋${d.battery}%` : 'Connected'}`,
+              value: isQuoted,
+              fullReplacement: `${btCmd} disconnect ${isQuoted}`,
+              bluetoothDevice: d,
+              actionKind: 'bluetooth_connect',
+            });
+          });
+
+        items.unshift({
+          id: 'cmd-bt-disconn-all',
+          type: 'command',
+          label: `${btCmd} disconnect`,
+          subtitle: 'Disconnect all active Bluetooth links',
+          value: `${btCmd} disconnect`,
+          fullReplacement: `${btCmd} disconnect`,
+        });
+
+        setSuggestions(items);
+        setSelectedSuggestionIdx(0);
+        setShowSuggestions(items.length > 0);
+        return;
+      }
+
+      // Case 4C: User typed "bluetooth" or "bt" alone (or with subcommands in progress)
+      if (!rest || ['on', 'off', 'toggle', 'scan', 'devices', 'pair', 'unpair', 'status', 'connect', 'disconnect'].some((s) => s.startsWith(rest))) {
+        // Quick toggle / on / off power
+        items.push({
+          id: 'bt-toggle',
+          type: 'subcommand',
+          label: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
+          subtitle: `Power ${isEnabled ? 'OFF' : 'ON'} Bluetooth Adapter (Radio is ${isEnabled ? 'ACTIVE / 2.4GHz' : 'SLEEP / DISABLED'})`,
+          value: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
+          fullReplacement: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
+          actionKind: 'bluetooth_toggle',
+        });
+
+        // Connect subcommand with interactive device list
+        items.push({
+          id: 'bt-connect-sub',
+          type: 'subcommand',
+          label: `${btCmd} connect <device>`,
+          subtitle: `Connect to paired/available devices (${devices.length} nearby)`,
+          value: `${btCmd} connect `,
+          fullReplacement: `${btCmd} connect `,
+        });
+
+        // Scan subcommand
+        items.push({
+          id: 'bt-scan-sub',
+          type: 'subcommand',
+          label: `${btCmd} scan`,
+          subtitle: 'Discover nearby Bluetooth LE and Classic peripherals',
+          value: `${btCmd} scan`,
+          fullReplacement: `${btCmd} scan`,
+        });
+
+        // Disconnect subcommand
+        items.push({
+          id: 'bt-disconnect-sub',
+          type: 'subcommand',
+          label: `${btCmd} disconnect`,
+          subtitle: 'Disconnect active Bluetooth audio or peripherals',
+          value: `${btCmd} disconnect`,
+          fullReplacement: `${btCmd} disconnect`,
+        });
+
+        // List devices subcommand
+        items.push({
+          id: 'bt-devices-sub',
+          type: 'subcommand',
+          label: `${btCmd} devices`,
+          subtitle: 'View detailed device table, MACs, codecs, and battery levels',
+          value: `${btCmd} devices`,
+          fullReplacement: `${btCmd} devices`,
+        });
+
+        // Also append top paired/connected devices for single-click connect
+        devices.slice(0, 4).forEach((d) => {
+          const isQuoted = d.name.includes(' ') ? `"${d.name}"` : d.name;
+          items.push({
+            id: `bt-quick-${d.id}`,
+            type: 'bluetooth',
+            label: d.name,
+            subtitle: `${d.connected ? '● Connected' : d.paired ? '○ Paired' : '◌ Available'} • ${d.mac}`,
+            value: isQuoted,
+            fullReplacement: `${btCmd} connect ${isQuoted}`,
+            bluetoothDevice: d,
+            actionKind: 'bluetooth_connect',
+          });
+        });
+
+        const filteredItems = rest
+          ? items.filter((item) => item.label.toLowerCase().includes(rest) || item.value.toLowerCase().includes(rest))
+          : items;
+
+        setSuggestions(filteredItems.length > 0 ? filteredItems : items);
+        setSelectedSuggestionIdx(0);
+        setShowSuggestions(true);
+        return;
+      }
+    }
+
     const words = trimmed.split(/\s+/);
     const lastWord = words[words.length - 1];
 
@@ -392,7 +604,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         setShowSuggestions(false);
       }
     }
-  }, [input, allCandidates, apps, contacts, recentCalls, scripts]);
+  }, [input, allCandidates, apps, contacts, recentCalls, bluetoothState, scripts]);
 
   // Compute Inline Ghost Suggestion (Zsh/Fish style)
   const inlineGhostText = useMemo(() => {
@@ -604,6 +816,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   const isCallActive = input.trimStart().toLowerCase().startsWith('call') || input.trimStart().toLowerCase().startsWith('dial');
   const isOpenActive = input.trimStart().toLowerCase().startsWith('open') || input.trimStart().toLowerCase().startsWith('launch');
   const isUninstallActive = input.trimStart().toLowerCase().startsWith('uninstall') || input.trimStart().toLowerCase().startsWith('remove-app');
+  const isBtActive = input.trimStart().toLowerCase().startsWith('bluetooth') || input.trimStart().toLowerCase().startsWith('bt') || input.trimStart().toLowerCase().startsWith('bluetoothctl') || input.trimStart().toLowerCase().startsWith('bluez');
 
   return (
     <div className="relative w-full shrink-0 font-mono text-sm">
@@ -630,6 +843,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                 <Trash2 size={11} className="text-red-400" />
               ) : isCallActive ? (
                 <Phone size={11} className="text-emerald-400" />
+              ) : isBtActive ? (
+                <Bluetooth size={11} className="text-blue-400 animate-pulse" />
               ) : (
                 <Sparkles size={11} />
               )}
@@ -640,6 +855,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   ? 'Package Uninstaller • Tap [Uninstall] or [Tab]'
                   : isCallActive
                   ? 'Dialer & Recent Calls • [Tab] Complete or Tap [Call]'
+                  : isBtActive
+                  ? 'Bluetooth Manager • [Tab] Complete or Tap [Connect]'
                   : 'Inline Suggestions'}
               </span>
             </span>
@@ -654,6 +871,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
               const isContact = item.type === 'contact';
               const isApp = item.type === 'app';
               const isUninstall = item.type === 'uninstall';
+              const isBluetooth = item.type === 'bluetooth';
+              const isSubcommand = item.type === 'subcommand';
 
               return (
                 <div
@@ -681,6 +900,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           ? `${theme.successColor}25`
                           : isApp
                           ? `${theme.infoColor}25`
+                          : isBluetooth
+                          ? (item.bluetoothDevice?.connected ? `${theme.infoColor}35` : '#3b82f625')
                           : `${theme.accentColor}25`,
                         color: isUninstall
                           ? theme.errorColor
@@ -690,6 +911,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           ? theme.successColor
                           : isApp
                           ? theme.infoColor
+                          : isBluetooth
+                          ? (item.bluetoothDevice?.connected ? theme.infoColor : '#60a5fa')
                           : theme.accentColor,
                       }}
                     >
@@ -701,6 +924,12 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                         <User size={11} />
                       ) : isApp ? (
                         <AppWindow size={11} />
+                      ) : isBluetooth ? (
+                        item.bluetoothDevice?.connected ? (
+                          <BluetoothConnected size={11} />
+                        ) : (
+                          <Bluetooth size={11} />
+                        )
                       ) : (
                         <Terminal size={11} />
                       )}
@@ -780,6 +1009,58 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                       >
                         <PhoneCall size={9} />
                         <span>Call</span>
+                      </button>
+                    )}
+
+                    {isBluetooth && item.bluetoothDevice && (
+                      <button
+                        type="button"
+                        title={item.bluetoothDevice.connected ? `Disconnect ${item.bluetoothDevice.name}` : `Connect to ${item.bluetoothDevice.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const cmd = item.bluetoothDevice?.connected
+                            ? `bluetooth disconnect "${item.bluetoothDevice.name}"`
+                            : `bluetooth connect "${item.bluetoothDevice?.name}"`;
+                          directExecute(cmd);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        style={{
+                          backgroundColor: item.bluetoothDevice.connected ? `${theme.errorColor}20` : '#3b82f625',
+                          borderColor: item.bluetoothDevice.connected ? theme.errorColor : '#3b82f6',
+                          color: item.bluetoothDevice.connected ? theme.errorColor : '#60a5fa',
+                        }}
+                      >
+                        {item.bluetoothDevice.connected ? (
+                          <>
+                            <BluetoothOff size={9} />
+                            <span>Disconnect</span>
+                          </>
+                        ) : (
+                          <>
+                            <BluetoothConnected size={9} />
+                            <span>Connect</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    {item.actionKind === 'bluetooth_toggle' && (
+                      <button
+                        type="button"
+                        title="Toggle Bluetooth Radio Power"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          directExecute(item.fullReplacement || 'bluetooth toggle');
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        style={{
+                          backgroundColor: `${theme.accentColor}25`,
+                          borderColor: theme.accentColor,
+                          color: theme.accentColor,
+                        }}
+                      >
+                        <Power size={9} />
+                        <span>Toggle</span>
                       </button>
                     )}
 

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 
@@ -29,6 +29,8 @@ export interface CommandContext {
   setContacts: (fn: (prev: ContactItem[]) => ContactItem[]) => void;
   recentCalls: RecentCall[];
   setRecentCalls: (fn: (prev: RecentCall[]) => RecentCall[]) => void;
+  bluetoothState: BluetoothState;
+  setBluetoothState: (fn: (prev: BluetoothState) => BluetoothState) => void;
   timers: ActiveTimer[];
   setTimers: (fn: (prev: ActiveTimer[]) => ActiveTimer[]) => void;
   history: string[];
@@ -563,6 +565,13 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
         };
       }
 
+      case 'bluetooth':
+      case 'bt':
+      case 'bluetoothctl':
+      case 'bluez': {
+        return this.handleBluetooth(args, ctx);
+      }
+
       case 'battery':
       case 'bat':
       case 'batmon':
@@ -1037,6 +1046,8 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
         weather: 'weather [city]\nView current atmospheric conditions, temperature, humidity, wind, and forecast in ASCII art.',
         neofetch: 'neofetch\nDisplay system architecture, Android OS build, memory usage, battery metrics, and ASCII logo.',
         battery: 'battery [status | monitor | graph | top | saver | health | calibrate]\nHardware battery telemetry monitor. Type "battery monitor" to open interactive GUI, "battery graph" for 24h discharge curve, or "battery saver" to toggle low power mode.',
+        bluetooth: 'bluetooth [on | off | toggle | connect <device> | disconnect [device] | scan | pair <device> | unpair <device>]\nBluetooth 5.4 LE Audio & Peripheral Controller. Type "bluetooth on" to power on, "bluetooth off" to power down, or "bluetooth connect <device>" with interactive autocompletion.',
+        bt: 'bt [on | off | toggle | connect <device> | disconnect | scan | pair]\nShort alias for bluetooth controller suite. Type "bt connect " in the prompt to view paired & nearby devices.',
       };
 
       if (docs[topic]) {
@@ -1574,6 +1585,371 @@ Subcommands:
   • battery top         List top power-consuming apps & hardware
   • battery saver       Toggle battery saver mode
   • battery health      Detailed cell degradation & diagnostics`,
+    };
+  }
+
+  private static handleBluetooth(args: string[], ctx: CommandContext): CommandResult {
+    const sub = args[0]?.toLowerCase();
+    const btState = ctx.bluetoothState || { enabled: true, devices: [], discovering: false };
+    const devices = btState.devices || [];
+
+    const getSignalBar = (rssi: number) => {
+      if (rssi >= -50) return '█████';
+      if (rssi >= -65) return '████░';
+      if (rssi >= -75) return '███░░';
+      if (rssi >= -85) return '██░░░';
+      return '█░░░░';
+    };
+
+    // 1. NO ARGUMENTS / STATUS / LIST
+    if (!sub || sub === 'status' || sub === 'info' || sub === 'ls' || sub === 'list' || sub === 'devices') {
+      if (!btState.enabled) {
+        return {
+          type: 'output',
+          content: `🔷 BLUETOOTH ADAPTER (Disabled)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Controller:      hci0 (Qualcomm FastConnect 7800 / BT 5.4 LE Audio)
+  Status:          [POWERED OFF / RADIO INACTIVE]
+  RF Power:        0.0 dBm (Sleep Mode)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Quick Controls:
+  • bluetooth on           - Turn on Bluetooth adapter
+  • bluetooth toggle       - Toggle Bluetooth power
+  • bluetooth connect <dev>- Connect to a paired or available device
+  • bluetooth scan         - Discover nearby BLE/Classic devices`,
+        };
+      }
+
+      const connected = devices.filter((d) => d.connected);
+      const connectedSummary =
+        connected.length > 0
+          ? connected.map((c) => `${c.name} (${c.battery !== undefined ? `${c.battery}%` : 'Connected'})`).join(', ')
+          : 'None';
+
+      const rows = devices
+        .map((d, idx) => {
+          const num = String(idx + 1).padStart(2, ' ');
+          const statusLabel = d.connected ? 'CONNECTED' : d.paired ? 'PAIRED' : 'AVAILABLE';
+          const statusIcon = d.connected ? '●' : d.paired ? '○' : '◌';
+          const batStr = d.battery !== undefined ? `${d.battery}%`.padEnd(5, ' ') : '--   ';
+          const typeStr = d.type.charAt(0).toUpperCase() + d.type.slice(1);
+          const sigBar = getSignalBar(d.rssi);
+          return `  ${num}. [${statusIcon}] ${d.name.padEnd(26, ' ')} ${d.mac.padEnd(18, ' ')} ${typeStr.padEnd(11, ' ')} ${statusLabel.padEnd(10, ' ')} ${batStr} ${sigBar} (${d.rssi}dBm)`;
+        })
+        .join('\n');
+
+      return {
+        type: 'output',
+        content: `🔷 BLUETOOTH 5.4 LE CONTROLLER (hci0: Active)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Adapter:         hci0 [74:D0:2B:99:A1:0C] • Qualcomm FastConnect 7800
+  Status:          [POWERED ON / DISCOVERABLE / LOW LATENCY]
+  Active Codec:    LDAC 990kbps 32-bit/96kHz Hi-Res Audio
+  Connected (${connected.length}):   ${connectedSummary}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #      DEVICE NAME                MAC ADDRESS        TYPE        STATUS     BAT    SIGNAL
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${rows}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Quick Controls:
+  • bluetooth on / off / toggle    - Power controls
+  • bluetooth connect <device>     - Connect (e.g. 'bt connect Sony WH-1000XM5')
+  • bluetooth disconnect [device]  - Disconnect active device
+  • bluetooth scan                 - Scan & discover nearby BLE devices
+  • bluetooth pair <device>        - Pair with a nearby device`,
+      };
+    }
+
+    // 2. TURN ON
+    if (sub === 'on' || sub === 'enable' || sub === 'start' || sub === '1') {
+      if (btState.enabled) {
+        return {
+          type: 'output',
+          content: '🔷 Bluetooth adapter (hci0) is already ON and discoverable.',
+        };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        enabled: true,
+        devices: prev.devices.map((d) => (d.id === 'bt-1' || d.id === 'bt-3' ? { ...d, connected: true } : d)),
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick('modern', 0.4);
+      }
+
+      return {
+        type: 'success',
+        content: `[✓] Bluetooth adapter (hci0) ENABLED.
+Radio active on 2.4 GHz ISM band.
+✓ Auto-reconnected to Sony WH-1000XM5 (85% battery, LDAC 990kbps)
+✓ Auto-reconnected to Galaxy Watch 6 Classic (72% battery, BLE Sync)`,
+      };
+    }
+
+    // 3. TURN OFF
+    if (sub === 'off' || sub === 'disable' || sub === 'stop' || sub === '0') {
+      if (!btState.enabled) {
+        return {
+          type: 'output',
+          content: '🔷 Bluetooth adapter (hci0) is already powered OFF.',
+        };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        enabled: false,
+        devices: prev.devices.map((d) => ({ ...d, connected: false })),
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick('mechanical', 0.2);
+      }
+
+      return {
+        type: 'success',
+        content: `[✓] Bluetooth adapter (hci0) DISABLED.
+All wireless audio streams, BLE peripherals, and radios powered down.`,
+      };
+    }
+
+    // 4. TOGGLE
+    if (sub === 'toggle') {
+      const willEnable = !btState.enabled;
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        enabled: willEnable,
+        devices: willEnable
+          ? prev.devices.map((d) => (d.id === 'bt-1' || d.id === 'bt-3' ? { ...d, connected: true } : d))
+          : prev.devices.map((d) => ({ ...d, connected: false })),
+      }));
+
+      return {
+        type: 'success',
+        content: willEnable
+          ? `[✓] Bluetooth toggled ON (Connected: Sony WH-1000XM5, Galaxy Watch 6)`
+          : `[✓] Bluetooth toggled OFF`,
+      };
+    }
+
+    // 5. SCAN / DISCOVER
+    if (sub === 'scan' || sub === 'discovery' || sub === 'discover' || sub === 'search') {
+      if (!btState.enabled) {
+        ctx.setBluetoothState((prev) => ({ ...prev, enabled: true }));
+      }
+
+      const scanRows = devices
+        .map((d) => {
+          const statusLabel = d.connected ? '[CONNECTED]' : d.paired ? '[PAIRED]' : '[AVAILABLE]';
+          const typeStr = d.type.toUpperCase();
+          const sigBar = getSignalBar(d.rssi);
+          const icon = d.connected ? '●' : d.paired ? '○' : '◌';
+          return `  [${icon}] ${d.name.padEnd(28, ' ')} ${d.mac.padEnd(18, ' ')} ${typeStr.padEnd(11, ' ')} ${statusLabel.padEnd(12, ' ')} ${sigBar} (${d.rssi} dBm)`;
+        })
+        .join('\n');
+
+      return {
+        type: 'output',
+        content: `🔍 BLUETOOTH LE DISCOVERY ACTIVE (RSSI Scan Complete):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  STATUS  DEVICE NAME                  MAC ADDRESS        TYPE        STATE        SIGNAL STRENGTH
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${scanRows}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tip: Type 'bluetooth connect <device_name>' or 'bt connect ' for autocomplete.`,
+      };
+    }
+
+    // 6. CONNECT <device>
+    if (sub === 'connect' || sub === 'pair-connect') {
+      const targetQuery = args.slice(1).join(' ').trim().toLowerCase();
+      if (!targetQuery) {
+        const availableList = devices
+          .map((d) => `  • bluetooth connect "${d.name}" (${d.connected ? 'Connected' : d.paired ? 'Paired' : 'Available'})`)
+          .join('\n');
+        return {
+          type: 'output',
+          content: `Usage: bluetooth connect <device_name_or_mac>
+
+Available & Paired Devices:
+${availableList}
+
+Tip: Type 'bluetooth connect ' or 'bt connect ' in terminal prompt for instant interactive autocompletion.`,
+        };
+      }
+
+      // Auto enable if off
+      if (!btState.enabled) {
+        ctx.setBluetoothState((prev) => ({ ...prev, enabled: true }));
+      }
+
+      // Match device
+      let targetDevice = devices.find(
+        (d) => d.name.toLowerCase() === targetQuery || d.mac.toLowerCase() === targetQuery
+      );
+      if (!targetDevice) {
+        targetDevice = devices.find(
+          (d) => d.name.toLowerCase().includes(targetQuery) || d.mac.toLowerCase().includes(targetQuery)
+        );
+      }
+      if (!targetDevice && targetQuery.match(/^\d+$/)) {
+        const idx = parseInt(targetQuery, 10) - 1;
+        if (idx >= 0 && idx < devices.length) {
+          targetDevice = devices[idx];
+        }
+      }
+
+      if (!targetDevice) {
+        const newDev: BluetoothDevice = {
+          id: `bt-${Date.now()}`,
+          name: args.slice(1).join(' ').trim(),
+          mac: `${Math.floor(Math.random() * 89 + 10).toString(16)}:${Math.floor(Math.random() * 89 + 10).toString(16)}:${Math.floor(Math.random() * 89 + 10).toString(16)}:${Math.floor(Math.random() * 89 + 10).toString(16)}:${Math.floor(Math.random() * 89 + 10).toString(16)}:${Math.floor(Math.random() * 89 + 10).toString(16)}`.toUpperCase(),
+          type: 'headphones',
+          paired: true,
+          connected: true,
+          battery: 100,
+          rssi: -45,
+          codec: 'AAC 320kbps',
+        };
+
+        ctx.setBluetoothState((prev) => ({
+          ...prev,
+          enabled: true,
+          devices: [newDev, ...prev.devices],
+        }));
+
+        if (ctx.config.soundEnabled) soundManager.playKeyClick('modern', 0.4);
+
+        return {
+          type: 'success',
+          content: `[✓] Connected & Paired to new Bluetooth device: "${newDev.name}"
+  MAC:       ${newDev.mac}
+  Profile:   A2DP Audio Sink + HFP Hands-Free
+  Codec:     ${newDev.codec}
+  Battery:   100% | Latency: 28ms`,
+        };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        enabled: true,
+        devices: prev.devices.map((d) =>
+          d.id === targetDevice!.id ? { ...d, connected: true, paired: true } : d
+        ),
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick('modern', 0.4);
+      }
+
+      const codecInfo = targetDevice.codec ? `  Audio Codec:     ${targetDevice.codec}\n` : '';
+      const batInfo = targetDevice.battery !== undefined ? `  Battery Level:   ${targetDevice.battery}%\n` : '';
+
+      return {
+        type: 'success',
+        content: `[✓] Bluetooth device connected: "${targetDevice.name}"
+  MAC Address:     ${targetDevice.mac}
+  Device Type:     ${targetDevice.type.toUpperCase()}
+${batInfo}${codecInfo}  Signal Strength: ${targetDevice.rssi} dBm (Latency ~24ms)
+  Audio Route:     [MEDIA AUDIO + CALLS ROUTED TO ${targetDevice.name.toUpperCase()}]`,
+      };
+    }
+
+    // 7. DISCONNECT [device]
+    if (sub === 'disconnect' || sub === 'unconnect') {
+      const targetQuery = args.slice(1).join(' ').trim().toLowerCase();
+      if (!targetQuery) {
+        const connectedCount = devices.filter((d) => d.connected).length;
+        if (connectedCount === 0) {
+          return { type: 'output', content: '🔷 No active Bluetooth devices currently connected.' };
+        }
+
+        ctx.setBluetoothState((prev) => ({
+          ...prev,
+          devices: prev.devices.map((d) => ({ ...d, connected: false })),
+        }));
+
+        return {
+          type: 'success',
+          content: `[✓] Disconnected all (${connectedCount}) active Bluetooth connections.`,
+        };
+      }
+
+      const targetDevice = devices.find(
+        (d) => d.name.toLowerCase().includes(targetQuery) || d.mac.toLowerCase().includes(targetQuery)
+      );
+      if (!targetDevice) {
+        return { type: 'error', content: `bluetooth disconnect: Device '${targetQuery}' not found.` };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        devices: prev.devices.map((d) => (d.id === targetDevice.id ? { ...d, connected: false } : d)),
+      }));
+
+      return {
+        type: 'success',
+        content: `[✓] Disconnected from "${targetDevice.name}" (${targetDevice.mac}).`,
+      };
+    }
+
+    // 8. PAIR <device>
+    if (sub === 'pair') {
+      const targetQuery = args.slice(1).join(' ').trim().toLowerCase();
+      if (!targetQuery) {
+        return { type: 'error', content: 'Usage: bluetooth pair <device_name_or_mac>' };
+      }
+
+      const targetDevice = devices.find(
+        (d) => d.name.toLowerCase().includes(targetQuery) || d.mac.toLowerCase().includes(targetQuery)
+      );
+      if (!targetDevice) {
+        return {
+          type: 'error',
+          content: `bluetooth pair: Device '${targetQuery}' not found in scan results. Try 'bluetooth scan' first.`,
+        };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        devices: prev.devices.map((d) => (d.id === targetDevice.id ? { ...d, paired: true } : d)),
+      }));
+
+      return {
+        type: 'success',
+        content: `[✓] Successfully paired with "${targetDevice.name}" [${targetDevice.mac}].`,
+      };
+    }
+
+    // 9. UNPAIR <device>
+    if (sub === 'unpair' || sub === 'remove' || sub === 'forget') {
+      const targetQuery = args.slice(1).join(' ').trim().toLowerCase();
+      if (!targetQuery) {
+        return { type: 'error', content: 'Usage: bluetooth unpair <device_name_or_mac>' };
+      }
+
+      const targetDevice = devices.find(
+        (d) => d.name.toLowerCase().includes(targetQuery) || d.mac.toLowerCase().includes(targetQuery)
+      );
+      if (!targetDevice) {
+        return { type: 'error', content: `bluetooth unpair: Device '${targetQuery}' not found.` };
+      }
+
+      ctx.setBluetoothState((prev) => ({
+        ...prev,
+        devices: prev.devices.map((d) => (d.id === targetDevice.id ? { ...d, paired: false, connected: false } : d)),
+      }));
+
+      return {
+        type: 'success',
+        content: `[✓] Forgot and unpaired device "${targetDevice.name}" [${targetDevice.mac}].`,
+      };
+    }
+
+    return {
+      type: 'error',
+      content: `bluetooth: unknown subcommand '${sub}'. Type 'bluetooth' or 'help bluetooth' for valid commands.`,
     };
   }
 

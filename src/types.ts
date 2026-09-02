@@ -115,6 +115,24 @@ export interface RecentCall {
   duration?: string;
 }
 
+export interface BluetoothDevice {
+  id: string;
+  name: string;
+  mac: string;
+  type: 'headphones' | 'speaker' | 'watch' | 'keyboard' | 'phone' | 'car' | 'other';
+  paired: boolean;
+  connected: boolean;
+  battery?: number;
+  rssi: number;
+  codec?: string;
+}
+
+export interface BluetoothState {
+  enabled: boolean;
+  devices: BluetoothDevice[];
+  discovering: boolean;
+}
+
 export interface ActiveTimer {
   id: string;
   label: string;

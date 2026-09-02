@@ -17,7 +17,8 @@ import {
   RecentCall,
   ActiveTimer,
   BatteryTelemetry,
-  AppNotification
+  AppNotification,
+  BluetoothState
 } from './types';
 import { DEFAULT_THEMES } from './data/themes';
 import { DEFAULT_APPS } from './data/defaultApps';
@@ -29,7 +30,8 @@ import {
   DEFAULT_TODOS, 
   DEFAULT_CONTACTS,
   DEFAULT_RECENT_CALLS,
-  DEFAULT_NOTIFICATIONS
+  DEFAULT_NOTIFICATIONS,
+  DEFAULT_BLUETOOTH_STATE
 } from './data/defaultData';
 import { StatusBar } from './components/StatusBar';
 import { CommandLine } from './components/CommandLine';
@@ -205,6 +207,22 @@ export default function App() {
       localStorage.setItem('android_tui_recent_calls', JSON.stringify(recentCalls));
     } catch {}
   }, [recentCalls]);
+
+  // 8c. Persistent Bluetooth State
+  const [bluetoothState, setBluetoothState] = useState<BluetoothState>(() => {
+    try {
+      const stored = localStorage.getItem('android_tui_bluetooth');
+      return stored ? JSON.parse(stored) : DEFAULT_BLUETOOTH_STATE;
+    } catch {
+      return DEFAULT_BLUETOOTH_STATE;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('android_tui_bluetooth', JSON.stringify(bluetoothState));
+    } catch {}
+  }, [bluetoothState]);
 
   // 9. Active Timers
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
@@ -388,6 +406,8 @@ Press [Tab] anytime for auto-completion.`,
         setContacts,
         recentCalls,
         setRecentCalls,
+        bluetoothState,
+        setBluetoothState,
         timers,
         setTimers,
         notifications,
@@ -438,7 +458,7 @@ Press [Tab] anytime for auto-completion.`,
         ]);
       }
     },
-    [config, currentTheme, apps, aliases, scripts, notes, todos, contacts, timers, history, batteryLevel, isCharging, wifiSsid, batteryTelemetry]
+    [config, currentTheme, apps, aliases, scripts, notes, todos, contacts, recentCalls, bluetoothState, timers, history, batteryLevel, isCharging, wifiSsid, batteryTelemetry]
   );
 
   // 16. Touch Bar Key Injection
@@ -511,6 +531,7 @@ Press [Tab] anytime for auto-completion.`,
           isCharging={isCharging}
           powerSaver={powerSaver}
           wifiSsid={wifiSsid}
+          bluetoothState={bluetoothState}
           onToggleSound={() => setConfig((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))}
           onToggleCrt={() => setConfig((prev) => ({ ...prev, crtEffect: !prev.crtEffect }))}
           onOpenThemeModal={() => setIsThemeModalOpen(true)}
@@ -570,6 +591,7 @@ Press [Tab] anytime for auto-completion.`,
           aliases={aliases}
           contacts={contacts}
           recentCalls={recentCalls}
+          bluetoothState={bluetoothState}
           history={history}
           onSubmit={handleExecuteCommand}
           onClear={() => setLines([])}

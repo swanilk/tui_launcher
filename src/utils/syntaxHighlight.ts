@@ -14,7 +14,7 @@ export const KNOWN_COMMANDS = new Set([
   'search', 'google', 'ddg', 'yt', 'youtube',
   'calc', 'eval',
   'weather', 'wttr',
-  'wifi', 'battery', 'device', 'sysinfo', 'neofetch', 'fastfetch', 'info',
+  'wifi', 'bluetooth', 'bt', 'bluetoothctl', 'battery', 'device', 'sysinfo', 'neofetch', 'fastfetch', 'info',
   'alias', 'unalias', 'aliases',
   'theme', 'themes', 'theme-edit', 'theme-custom',
   'history', 'hist',
@@ -50,7 +50,8 @@ export const KNOWN_SUBCOMMANDS = new Set([
   'create', 'new', 'edit', 'run', 'exec',
   'done', 'check', 'uncheck', 'toggle',
   'find', 'search', 'get', 'set',
-  'enable', 'disable', 'toggle',
+  'enable', 'disable', 'toggle', 'on', 'off',
+  'connect', 'disconnect', 'pair', 'unpair', 'scan', 'devices', 'status',
   'export', 'import', 'reset', 'clear',
 ]);
 

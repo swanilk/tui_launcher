@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, VirtualFile, AppNotification } from '../types';
+import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, VirtualFile, AppNotification } from '../types';
 
 export const DEFAULT_CONFIG: LauncherConfig = {
   promptUser: 'u0_a284',
@@ -146,6 +146,94 @@ export const DEFAULT_RECENT_CALLS: RecentCall[] = [
     duration: '2m 10s',
   },
 ];
+
+export const DEFAULT_BLUETOOTH_DEVICES: BluetoothDevice[] = [
+  {
+    id: 'bt-1',
+    name: 'Sony WH-1000XM5',
+    mac: '70:26:05:A1:B2:C3',
+    type: 'headphones',
+    paired: true,
+    connected: true,
+    battery: 85,
+    rssi: -42,
+    codec: 'LDAC 990kbps (Hi-Res Audio)',
+  },
+  {
+    id: 'bt-2',
+    name: 'Pixel Buds Pro 2',
+    mac: '38:86:F7:1D:9E:44',
+    type: 'headphones',
+    paired: true,
+    connected: false,
+    battery: 95,
+    rssi: -58,
+    codec: 'AAC-LC Spatial',
+  },
+  {
+    id: 'bt-3',
+    name: 'Galaxy Watch 6 Classic',
+    mac: '84:C7:EA:33:90:11',
+    type: 'watch',
+    paired: true,
+    connected: true,
+    battery: 72,
+    rssi: -38,
+  },
+  {
+    id: 'bt-4',
+    name: 'Keychron K3 Pro',
+    mac: 'DC:2C:26:FA:4B:92',
+    type: 'keyboard',
+    paired: true,
+    connected: false,
+    battery: 90,
+    rssi: -65,
+  },
+  {
+    id: 'bt-5',
+    name: 'JBL Charge 5',
+    mac: 'AC:12:03:77:88:99',
+    type: 'speaker',
+    paired: false,
+    connected: false,
+    rssi: -72,
+  },
+  {
+    id: 'bt-6',
+    name: 'Tesla Model 3 Audio',
+    mac: '9C:E6:5E:2B:10:FA',
+    type: 'car',
+    paired: true,
+    connected: false,
+    rssi: -85,
+    codec: 'aptX HD',
+  },
+  {
+    id: 'bt-7',
+    name: 'AirPods Max (Living Room)',
+    mac: 'E0:F8:47:AA:BB:CC',
+    type: 'headphones',
+    paired: false,
+    connected: false,
+    rssi: -78,
+  },
+  {
+    id: 'bt-8',
+    name: 'Anker Soundcore Motion+',
+    mac: 'F4:0F:24:6D:E1:50',
+    type: 'speaker',
+    paired: false,
+    connected: false,
+    rssi: -81,
+  },
+];
+
+export const DEFAULT_BLUETOOTH_STATE: BluetoothState = {
+  enabled: true,
+  devices: DEFAULT_BLUETOOTH_DEVICES,
+  discovering: false,
+};
 
 export const INITIAL_FILESYSTEM: VirtualFile[] = [
   {
