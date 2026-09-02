@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Theme, LauncherConfig, BluetoothState, HotspotState } from '../types';
 import { 
   Wifi, 
@@ -23,6 +23,7 @@ import {
   Flame,
   Radio
 } from 'lucide-react';
+import { StatusBarClockPill } from './CelestialClock';
 
 export type MainTabType = 'apps' | 'notifs' | 'term';
 
@@ -46,6 +47,7 @@ interface StatusBarProps {
   onOpenAppLauncher?: () => void;
   onOpenNotifications?: () => void;
   onOpenBatteryModal?: () => void;
+  onOpenClockModal?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -68,26 +70,8 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenAppLauncher,
   onOpenNotifications,
   onOpenBatteryModal,
+  onOpenClockModal,
 }) => {
-  const [timeStr, setTimeStr] = useState('');
-
-  useEffect(() => {
-    const updateTime = () => {
-      const now = new Date();
-      setTimeStr(
-        now.toLocaleTimeString([], {
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-          hour12: !config.clock24h,
-        })
-      );
-    };
-    updateTime();
-    const interval = setInterval(updateTime, 1000);
-    return () => clearInterval(interval);
-  }, [config.clock24h]);
-
   return (
     <header
       id="tui-status-bar"
@@ -101,24 +85,24 @@ export const StatusBar: React.FC<StatusBarProps> = ({
       {/* Left side: High Density Device & OS Telemetry */}
       <div className="flex items-center gap-2 sm:gap-3 text-[11px] overflow-hidden">
         <span className="font-bold tracking-tight shrink-0" style={{ color: theme.promptColor }}>
-          [ DEVICE: ANDROID-16 ]
+          [ ANDROID-16 ]
         </span>
-        <span className="hidden md:inline opacity-70 shrink-0">
+        <span className="hidden xl:inline opacity-70 shrink-0">
           [ OS: BAKLAVA-API36 ]
         </span>
-        <span className="hidden sm:inline opacity-80 shrink-0" style={{ color: theme.accentColor }}>
-          [ 16KB-PAGE: ALIGNED ]
+        <span className="hidden md:inline opacity-80 shrink-0" style={{ color: theme.accentColor }}>
+          [ 16KB-PAGE ]
         </span>
       </div>
 
       {/* Center: Quick interactive Top Tabs (Apps, Notifs, Term) */}
-      <div className="flex items-center gap-1 sm:gap-1.5 mx-1 sm:mx-2">
+      <div className="flex items-center gap-1 sm:gap-1.5 mx-1">
         {/* Apps Tab Button */}
         <button
           id="btn-quick-apps"
           onClick={() => onSelectTab('apps')}
           title="Switch to Apps Tab (Ctrl+1)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          className="flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
           style={{
             borderColor: activeTab === 'apps' ? theme.accentColor : theme.borderColor,
             backgroundColor: activeTab === 'apps' ? `${theme.accentColor}30` : `${theme.accentColor}10`,
@@ -143,7 +127,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           id="btn-quick-notifs"
           onClick={() => onSelectTab('notifs')}
           title="Switch to Notifications Tab (Ctrl+2)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          className="flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
           style={{
             borderColor: activeTab === 'notifs' ? (theme.warningColor || '#ffcc00') : (notifsCount > 0 ? `${theme.warningColor || '#ffcc00'}80` : theme.borderColor),
             backgroundColor: activeTab === 'notifs' ? `${theme.warningColor || '#ffcc00'}30` : (notifsCount > 0 ? `${theme.warningColor || '#ffcc00'}15` : 'transparent'),
@@ -168,7 +152,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           id="btn-quick-term"
           onClick={() => onSelectTab('term')}
           title="Switch to Terminal Output Tab (Ctrl+3)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          className="flex items-center gap-1 px-2.5 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
           style={{
             borderColor: activeTab === 'term' ? theme.promptColor : theme.borderColor,
             backgroundColor: activeTab === 'term' ? `${theme.promptColor}30` : `${theme.promptColor}10`,
@@ -193,7 +177,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           id="btn-quick-themes"
           onClick={onOpenThemeModal}
           title="Switch Theme (Alt+T)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border rounded"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border rounded ml-1"
           style={{ borderColor: theme.borderColor, color: theme.fg }}
         >
           <Palette size={11} />

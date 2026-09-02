@@ -47,6 +47,7 @@ import { NanoEditor } from './components/NanoEditor';
 import { HistorySearchModal } from './components/HistorySearchModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { BatteryMonitorModal } from './components/BatteryMonitorModal';
+import { CelestialClockModal, CelestialDateTimeSection } from './components/CelestialClock';
 import { MatrixScreen } from './components/MatrixScreen';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { soundManager } from './utils/audio';
@@ -291,6 +292,7 @@ Press [Tab] anytime for auto-completion.`,
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isBatteryModalOpen, setIsBatteryModalOpen] = useState(false);
+  const [isClockModalOpen, setIsClockModalOpen] = useState(false);
   const [isMatrixActive, setIsMatrixActive] = useState(false);
 
   // 13. Telemetry: Battery and Wifi
@@ -475,6 +477,7 @@ Press [Tab] anytime for auto-completion.`,
         openThemeModal: () => setIsThemeModalOpen(true),
         openHistoryModal: () => setIsHistoryModalOpen(true),
         openBatteryModal: () => setIsBatteryModalOpen(true),
+        openClockModal: () => setIsClockModalOpen(true),
         togglePowerSaver: () => setPowerSaver((p) => !p),
         setMatrixActive: (active: boolean) => setIsMatrixActive(active),
         activeTab,
@@ -599,8 +602,16 @@ Press [Tab] anytime for auto-completion.`,
           onToggleCrt={() => setConfig((prev) => ({ ...prev, crtEffect: !prev.crtEffect }))}
           onOpenThemeModal={() => setIsThemeModalOpen(true)}
           onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
+          onOpenClockModal={() => setIsClockModalOpen(true)}
         />
       )}
+
+      {/* 24-Hour Date, Time & Celestial Solar/Lunar Phase Section (90% Width) */}
+      <CelestialDateTimeSection
+        theme={currentTheme}
+        config={config}
+        onOpenModal={() => setIsClockModalOpen(true)}
+      />
 
       {/* Main Tab Content View: Apps, Notifs, Term */}
       <main className="flex-1 min-h-0 overflow-hidden px-2 sm:px-3 py-1 flex flex-col">
@@ -777,6 +788,16 @@ Press [Tab] anytime for auto-completion.`,
           onClose={() => setIsBatteryModalOpen(false)}
           onTogglePowerSaver={() => setPowerSaver((p) => !p)}
           soundEnabled={config.soundEnabled}
+        />
+      )}
+
+      {/* 24-Hour Celestial Clock, Calendar & Solar/Lunar Tracker Modal */}
+      {isClockModalOpen && (
+        <CelestialClockModal
+          isOpen={isClockModalOpen}
+          onClose={() => setIsClockModalOpen(false)}
+          theme={currentTheme}
+          config={config}
         />
       )}
 

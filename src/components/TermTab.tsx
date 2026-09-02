@@ -16,7 +16,8 @@ import {
   BatteryCharging, 
   CloudSun, 
   Activity,
-  ArrowDownCircle
+  ArrowDownCircle,
+  Clock
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
@@ -41,6 +42,7 @@ export const TermTab: React.FC<TermTabProps> = ({
 }) => {
   const quickActions = [
     { label: 'Clear', cmd: 'clear', icon: <Trash2 size={11} /> },
+    { label: 'Clock', cmd: 'clock', icon: <Clock size={11} /> },
     { label: 'Help', cmd: 'help', icon: <HelpCircle size={11} /> },
     { label: 'Neofetch', cmd: 'neofetch', icon: <Cpu size={11} /> },
     { label: 'Bluetooth', cmd: 'bluetooth', icon: <Bluetooth size={11} /> },

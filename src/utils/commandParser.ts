@@ -43,6 +43,7 @@ export interface CommandContext {
   openThemeModal: () => void;
   openHistoryModal: () => void;
   openBatteryModal?: () => void;
+  openClockModal?: () => void;
   togglePowerSaver?: () => void;
   setMatrixActive: (active: boolean) => void;
   activeTab?: 'apps' | 'notifs' | 'term';
@@ -876,12 +877,11 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
       }
 
       case 'date':
-      case 'time': {
-        const now = new Date();
-        return {
-          type: 'output',
-          content: `📅 ${now.toDateString()} ${now.toLocaleTimeString()} (${Intl.DateTimeFormat().resolvedOptions().timeZone})`,
-        };
+      case 'time':
+      case 'clock':
+      case 'cal':
+      case 'chronometer': {
+        return this.handleClock(args, ctx);
       }
 
       case 'uptime': {
@@ -2266,6 +2266,133 @@ Quick Commands:
   • hotspot config <ssid> [pass]   - Configure SSID and password
   • hotspot clients                - List connected tethered client devices
   • hotspot pass [new_pass]        - View or update Wi-Fi security key`,
+    };
+  }
+
+  private static handleClock(args: string[], ctx: CommandContext): CommandResult {
+    const sub = args[0]?.toLowerCase();
+
+    // Check if user requested GUI modal
+    if (sub === 'gui' || sub === 'modal' || sub === '-g' || sub === '--gui' || sub === 'open') {
+      if (ctx.openClockModal) {
+        ctx.openClockModal();
+        return { type: 'success', content: '⏱️ Opened Celestial 24h Chronometer & Solar/Lunar Tracker.' };
+      }
+    }
+
+    const now = new Date();
+    const hours = now.getHours();
+    const minutes = now.getMinutes();
+    const seconds = now.getSeconds();
+
+    // 24-hour time formatting: HH:MM:SS
+    const time24h = `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+    
+    // Day of week & date
+    const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
+    const fullDate = now.toLocaleDateString('en-US', { day: '2-digit', month: 'long', year: 'numeric' });
+    const shortDate = now.toLocaleDateString('en-US', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' });
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+    // Day of Year
+    const startOfYear = new Date(now.getFullYear(), 0, 1);
+    const dayOfYear = Math.floor((now.getTime() - startOfYear.getTime()) / (1000 * 60 * 60 * 24)) + 1;
+    const totalMinutes = hours * 60 + minutes;
+    const cycleProgressPct = ((totalMinutes / 1440) * 100).toFixed(1);
+
+    // Determine 4 Periods: Morning, Noon, Evening, Night
+    let periodName = 'Night';
+    let periodBadge = '🌙 NIGHT';
+    let celestialAscii = '';
+    let phaseDescription = '';
+    let phaseHours = '21:00 - 04:59';
+
+    if (hours >= 5 && hours < 12) {
+      periodName = 'Morning';
+      periodBadge = '🌅 MORNING (DAWN)';
+      phaseHours = '05:00 - 11:59';
+      phaseDescription = 'Sun climbing eastern horizon. Solar irradiance ascending.';
+      celestialAscii = `
+               \\   |   /     
+                .-'''-.       [ 🌅 MORNING : SUNRISE ASCENT ]
+             --(  ☀️   )--     05:00 - 11:59 (Active)
+                .'-.-'.       Eastern horizon dawn elevation
+               /   |   \\     
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ (Eastern Horizon)
+`;
+    } else if (hours >= 12 && hours < 17) {
+      periodName = 'Noon';
+      periodBadge = '☀️ NOON (ZENITH)';
+      phaseHours = '12:00 - 16:59';
+      phaseDescription = 'Sun at meridian zenith. Maximum solar irradiance and apex daylight.';
+      celestialAscii = `
+                \\  |  /      
+              '-. | .-'      [ ☀️ NOON : SOLAR ZENITH ]
+             — ( 🌞 ) —      12:00 - 16:59 (Active)
+              .-' | '-.      Peak meridian solar altitude
+                /  |  \\      
+   ================================ (Solar Noon Meridian)
+`;
+    } else if (hours >= 17 && hours < 21) {
+      periodName = 'Evening';
+      periodBadge = '🌇 EVENING (TWILIGHT)';
+      phaseHours = '17:00 - 20:59';
+      phaseDescription = 'Sun dipping into western horizon. Golden hour transitioning into twilight.';
+      celestialAscii = `
+                .---.        
+              /       \\       [ 🌇 EVENING : TWILIGHT DESCENT ]
+             |   🌇    |      17:00 - 20:59 (Active)
+         - - -\\-------/- - -  Western horizon sunset & dusk
+   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ (Western Horizon)
+`;
+    } else {
+      periodName = 'Night';
+      periodBadge = '🌙 NIGHT (NOCTURNAL)';
+      phaseHours = '21:00 - 04:59';
+      phaseDescription = 'Nocturnal sky illuminated by the Moon & cosmic constellations.';
+      celestialAscii = `
+                .---.        *   .   *   .  ✨
+               /   / \\       [ 🌙 NIGHT : NOCTURNAL SKY ]
+              |   |   |   .  21:00 - 04:59 (Active)
+               \\   \\ /       Lunar transit & stellar cosmos
+                '---'   *    
+   ................................ (Night Sky Nadir)
+`;
+    }
+
+    // Visual Day-Night Progress Bar
+    // 00:00 (0) -> 06:00 (6) -> 12:00 (12) -> 18:00 (18) -> 24:00 (24)
+    const barWidth = 32;
+    const markerIndex = Math.min(barWidth - 1, Math.floor((totalMinutes / 1440) * barWidth));
+    const barChars = Array(barWidth).fill('─');
+    barChars[markerIndex] = '🔘';
+    const visualTimeline = barChars.join('');
+
+    return {
+      type: 'output',
+      content: `⏱️ 24-HOUR CELESTIAL CHRONOMETER & SOLAR/LUNAR TRACKER:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  24h Time:        ${time24h} (HH:MM:SS)
+  Day of Week:     ${dayOfWeek.toUpperCase()}
+  Full Date:       ${fullDate} (${shortDate})
+  Current Phase:   ${periodBadge} [${phaseHours}]
+  Timezone:        ${tz} (UTC${(now.getTimezoneOffset() <= 0 ? '+' : '-') + String(Math.abs(Math.floor(now.getTimezoneOffset() / 60))).padStart(2, '0')}:${String(Math.abs(now.getTimezoneOffset() % 60)).padStart(2, '0')})
+  Day of Year:     Day ${dayOfYear} of 365 (${cycleProgressPct}% of 24h Solar Cycle)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+CELESTIAL SKY DIAGRAM:
+${celestialAscii.trim()}
+
+24-HOUR CELESTIAL PHASES:
+  • 🌅 Morning (Dawn):     05:00 - 11:59 ${periodName === 'Morning' ? '◄ [ACTIVE NOW]' : ''}
+  • ☀️ Noon (Zenith):      12:00 - 16:59 ${periodName === 'Noon' ? '◄ [ACTIVE NOW]' : ''}
+  • 🌇 Evening (Twilight): 17:00 - 20:59 ${periodName === 'Evening' ? '◄ [ACTIVE NOW]' : ''}
+  • 🌙 Night (Nocturnal):  21:00 - 04:59 ${periodName === 'Night' ? '◄ [ACTIVE NOW]' : ''}
+
+24H SOLAR TIMELINE:
+  00:00 [🌙] ── 06:00 [🌅] ── 12:00 [☀️] ── 18:00 [🌇] ── 24:00 [🌙]
+  [ ${visualTimeline} ] (${cycleProgressPct}%)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tip: Type 'clock gui' to open interactive Solar/Lunar Chronometer.`,
     };
   }
 
