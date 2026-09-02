@@ -5,6 +5,7 @@
 
 import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, ActiveTimer, Theme, BatteryTelemetry } from '../types';
 import { virtualFS } from './fileSystem';
+import { soundManager } from './audio';
 
 export interface CommandContext {
   config: LauncherConfig;
@@ -187,7 +188,7 @@ export class CommandParser {
         return this.handleHelp(args);
       }
 
-      // 2. APPS MANAGEMENT & LAUNCH
+      // 2. APPS MANAGEMENT, LAUNCH & UNINSTALL
       case 'apps':
       case 'app':
       case 'ls-apps': {
@@ -198,9 +199,23 @@ export class CommandParser {
       case 'launch':
       case 'start': {
         if (args.length === 0) {
-          return { type: 'error', content: 'Usage: open <app_name | url | package>' };
+          const topApps = ctx.apps.slice(0, 6).map((a) => `  • open "${a.name}"`).join('\n');
+          return {
+            type: 'output',
+            content: `🚀 ANDROID APPLICATION LAUNCHER:
+Usage: open <app_name | url | package>
+Examples:
+  • open Chrome
+  • open Camera
+  • open Spotify
+  • open https://github.com
+Available Installed Apps:
+${topApps}
+
+Tip: You can also type the app name directly (e.g. 'camera') or type 'open ' for suggestions!`,
+          };
         }
-        const target = args.join(' ').toLowerCase();
+        const target = args.join(' ').replace(/^["']|["']$/g, '').trim().toLowerCase();
         
         // Check web url
         if (target.startsWith('http://') || target.startsWith('https://') || target.includes('.com') || target.includes('.org') || target.includes('.io')) {
@@ -211,12 +226,14 @@ export class CommandParser {
           return { type: 'success', content: `[✓] Opened URL: ${url}` };
         }
 
-        // Find app
+        // Find app by exact name, packageName, id, or substring
         const found = ctx.apps.find(
           (a) => a.name.toLowerCase() === target ||
                  a.packageName.toLowerCase() === target ||
-                 a.id.toLowerCase() === target ||
-                 a.name.toLowerCase().includes(target)
+                 a.id.toLowerCase() === target
+        ) || ctx.apps.find(
+          (a) => a.name.toLowerCase().includes(target) ||
+                 a.packageName.toLowerCase().includes(target)
         );
 
         if (found) {
@@ -224,22 +241,174 @@ export class CommandParser {
             return this.executeSingle(found.commandToRun, ctx);
           }
           ctx.openAppModal(found);
-          return { type: 'success', content: `[✓] Launching ${found.name} (${found.packageName})...` };
+          return {
+            type: 'success',
+            content: `[✓] Launching ${found.name} (${found.packageName})...`,
+            metadata: {
+              action: 'open_app',
+              app: found,
+            },
+          };
         }
 
-        return { type: 'error', content: `open: app '${target}' not found. Type 'apps' to see all installed applications.` };
+        const closeMatches = ctx.apps
+          .filter((a) => a.name.toLowerCase().startsWith(target.slice(0, 2)))
+          .map((a) => a.name);
+        const suggestionNote = closeMatches.length > 0 ? `\nDid you mean: ${closeMatches.join(', ')}?` : '';
+
+        return {
+          type: 'error',
+          content: `open: app '${target}' not found.${suggestionNote}\nType 'apps' to see all installed applications.`,
+        };
+      }
+
+      case 'uninstall':
+      case 'remove-app':
+      case 'pm':
+      case 'pkg': {
+        let target = '';
+        if (command === 'pm' || command === 'pkg') {
+          const sub = args[0]?.toLowerCase();
+          if (sub === 'uninstall' || sub === 'remove' || sub === 'rm') {
+            target = args.slice(1).join(' ').trim();
+          } else if (sub === 'list' || sub === 'packages') {
+            return this.handleApps(args.slice(1), ctx);
+          } else {
+            return {
+              type: 'output',
+              content: `📦 Package Manager (${command}):\n  Usage: ${command} uninstall <app_name | package_name>\n         ${command} list packages`,
+            };
+          }
+        } else {
+          target = args.join(' ').trim();
+        }
+
+        if (!target) {
+          const appList = ctx.apps.slice(0, 6).map((a) => `  • uninstall "${a.name}" (${a.packageName})`).join('\n');
+          return {
+            type: 'output',
+            content: `🗑️ ANDROID PACKAGE UNINSTALLER:
+Usage: uninstall <app_name | package_name>
+Examples:
+  • uninstall Spotify
+  • uninstall com.android.camera2
+Available Installed Apps:
+${appList}
+
+Tip: Type 'uninstall ' to view interactive autocompletion suggestions.`,
+          };
+        }
+
+        const cleanTarget = target.toLowerCase().replace(/^["']|["']$/g, '');
+        const found = ctx.apps.find(
+          (a) => a.name.toLowerCase() === cleanTarget ||
+                 a.packageName.toLowerCase() === cleanTarget ||
+                 a.id.toLowerCase() === cleanTarget
+        ) || ctx.apps.find(
+          (a) => a.name.toLowerCase().includes(cleanTarget) ||
+                 a.packageName.toLowerCase().includes(cleanTarget)
+        );
+
+        if (!found) {
+          return {
+            type: 'error',
+            content: `uninstall: Package or application '${target}' is not installed.\nType 'apps' to view all installed applications.`,
+          };
+        }
+
+        // Remove from apps list
+        ctx.setApps((prev) => prev.filter((a) => a.id !== found.id));
+
+        const freedMb = (Math.random() * 35 + 15).toFixed(1);
+        return {
+          type: 'success',
+          content: `🗑️ UNINSTALL SUCCESSFUL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Application:  ${found.name}
+  Package:      ${found.packageName}
+  Category:     ${found.category}
+  Storage:      [✓] Reclaimed ${freedMb} MB app binaries and cache
+  Status:       PACKAGE_REMOVED (Android Package Manager)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+App '${found.name}' has been uninstalled successfully.`,
+          metadata: {
+            action: 'uninstall',
+            app: found,
+          },
+        };
       }
 
       // 3. PHONE CALL & SMS
       case 'call':
       case 'dial': {
-        if (args.length === 0) return { type: 'error', content: 'Usage: call <phone_number | contact_name>' };
-        const query = args.join(' ');
-        const contact = ctx.contacts.find((c) => c.name.toLowerCase().includes(query.toLowerCase()));
-        const phone = contact ? contact.phone : query;
+        if (args.length === 0) {
+          const contactHints = ctx.contacts.slice(0, 4).map((c) => `  • call "${c.name}" (${c.phone})`).join('\n');
+          return {
+            type: 'output',
+            content: `📞 ANDROID PHONE CALL DIALER:
+Usage: call <phone_number | contact_name>
+Examples:
+  • call 9614044766
+  • call Alex
+${contactHints}
+
+Tip: Type 'call ' in the prompt to view contact autocompletion options.`,
+          };
+        }
+
+        const rawQuery = args.join(' ').replace(/^["']|["']$/g, '').trim();
+        const cleanQueryNum = rawQuery.replace(/[^\d+]/g, '');
+
+        // Match contact by name or clean phone substring
+        const matchedContact = ctx.contacts.find((c) => {
+          const nameMatch = c.name.toLowerCase().includes(rawQuery.toLowerCase());
+          const phoneClean = c.phone.replace(/[^\d+]/g, '');
+          const phoneMatch = cleanQueryNum.length >= 3 && phoneClean.includes(cleanQueryNum);
+          return nameMatch || phoneMatch;
+        });
+
+        const targetName = matchedContact ? matchedContact.name : 'Direct Dial';
+        const targetPhone = matchedContact ? matchedContact.phone : rawQuery;
+        const cleanPhone = targetPhone.replace(/[^\d+*#]/g, '');
+
+        // Play dialer DTMF tone
+        if (ctx.config.soundEnabled) {
+          soundManager.playDialTone(ctx.config.soundVolume);
+        }
+
+        // Trigger native call intent (tel: scheme)
+        if (typeof window !== 'undefined' && cleanPhone) {
+          try {
+            const telUri = `tel:${cleanPhone}`;
+            const link = document.createElement('a');
+            link.href = telUri;
+            link.setAttribute('target', '_top');
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+              if (document.body.contains(link)) document.body.removeChild(link);
+            }, 500);
+          } catch {}
+        }
+
         return {
           type: 'success',
-          content: `📞 Calling ${contact ? `${contact.name} (${phone})` : phone}...\n[SIM 1 - 5G LTE Active Connection Simulated]`,
+          content: `📞 INITIATING OUTGOING CALL:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Target:       ${targetName}
+  Phone Number: ${targetPhone}
+  Protocol URI: tel:${cleanPhone}
+  Telephony:    Android VoLTE / 5G Radio Interface Layer
+  Status:       [✓] Dispatched to Device Phone Dialer
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Connecting call... If dialer did not open automatically, tap below.`,
+          metadata: {
+            action: 'call',
+            name: targetName,
+            phone: targetPhone,
+            cleanPhone,
+            timestamp: Date.now(),
+          },
         };
       }
 
@@ -823,8 +992,9 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
     if (args.length > 0) {
       const topic = args[0].toLowerCase();
       const docs: Record<string, string> = {
-        apps: 'apps [-a | -f | -s <query>]\nList installed apps, filter favorites (-f), or search (-s). You can launch apps with "open <name>" or by typing the app name directly.',
-        open: 'open <app_name | url | package>\nLaunch simulated Android applications or external web URLs.',
+        apps: 'apps [-a | -f | -s <query>]\nList installed apps, filter favorites (-f), or search (-s). You can launch apps with "open <name>" or by typing the app name directly. To uninstall: "uninstall <name>".',
+        open: 'open <app_name | url | package>\nLaunch simulated Android applications or external web URLs. You can also type the app name directly (e.g. "camera", "spotify").',
+        uninstall: 'uninstall <app_name | package_name>\nUninstall an application package and reclaim storage space. Synonyms: remove-app, pm uninstall, pkg uninstall.',
         alias: 'alias [name=\'command\']\nCreate custom shortcuts. Example: alias ll=\'ls -la\'\nTo remove an alias, use: unalias <name>',
         theme: 'theme [theme_name | ls]\nSwitch active theme or preview 12+ aesthetic TUI themes including Matrix CRT, Cyberpunk 2077, Dracula, Gruvbox, and Amber Phosphor.',
         script: 'script <create | run | ls | edit | rm>\nBuild and execute custom shell scripts. You can also edit scripts using the built-in "nano <file>" TUI editor.',
@@ -891,6 +1061,33 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
   }
 
   private static handleApps(args: string[], ctx: CommandContext): CommandResult {
+    const firstArg = args[0]?.toLowerCase();
+    if (firstArg === 'uninstall' || firstArg === 'remove' || firstArg === 'rm') {
+      const target = args.slice(1).join(' ');
+      const cleanTarget = target.toLowerCase().replace(/^["']|["']$/g, '');
+      const found = ctx.apps.find(
+        (a) => a.name.toLowerCase() === cleanTarget ||
+               a.packageName.toLowerCase() === cleanTarget ||
+               a.id.toLowerCase() === cleanTarget ||
+               a.name.toLowerCase().includes(cleanTarget)
+      );
+      if (!found) {
+        return { type: 'error', content: `apps uninstall: App '${target}' not found.` };
+      }
+      ctx.setApps((prev) => prev.filter((a) => a.id !== found.id));
+      return { type: 'success', content: `[✓] Successfully uninstalled app: ${found.name} (${found.packageName})` };
+    }
+
+    if (firstArg === 'open' || firstArg === 'launch') {
+      const target = args.slice(1).join(' ').toLowerCase();
+      const found = ctx.apps.find((a) => a.name.toLowerCase().includes(target));
+      if (found) {
+        ctx.openAppModal(found);
+        return { type: 'success', content: `[✓] Launching ${found.name}...` };
+      }
+      return { type: 'error', content: `apps open: App '${target}' not found.` };
+    }
+
     const showAll = args.includes('-a') || args.includes('--all');
     const showFavs = args.includes('-f') || args.includes('--fav');
     const searchIdx = args.findIndex((a) => a === '-s' || a === '--search');
@@ -914,7 +1111,7 @@ To build and generate APK binary package, run: 'apk build' or 'apk download'`,
 
     return {
       type: 'app_list',
-      content: `${header}\n${rows.join('\n')}\n\nTip: Type 'open <app_name>' or simply '<app_name>' to launch.`,
+      content: `${header}\n${rows.join('\n')}\n\nTip: Type 'open <app_name>' or simply '<app_name>' to launch. Type 'uninstall <app_name>' to remove.`,
     };
   }
 

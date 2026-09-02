@@ -532,6 +532,7 @@ Press [Tab] anytime for auto-completion.`,
           apps={apps}
           scripts={scripts}
           aliases={aliases}
+          contacts={contacts}
           history={history}
           onSubmit={handleExecuteCommand}
           onClear={() => setLines([])}

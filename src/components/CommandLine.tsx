@@ -4,10 +4,23 @@
  */
 
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias } from '../types';
+import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem } from '../types';
 import { tokenizeCommand, KNOWN_COMMANDS } from '../utils/syntaxHighlight';
 import { soundManager } from '../utils/audio';
 import { virtualFS } from '../utils/fileSystem';
+import { Phone, PhoneCall, Terminal, AppWindow, User, Sparkles, Trash2, Play, CornerDownLeft, ArrowRight } from 'lucide-react';
+
+export interface SuggestionItem {
+  id: string;
+  type: 'app' | 'command' | 'contact' | 'file' | 'theme' | 'uninstall' | 'subcommand';
+  label: string;
+  value: string;
+  fullReplacement?: string;
+  subtitle?: string;
+  phoneNumber?: string;
+  appObj?: AndroidApp;
+  actionKind?: 'open' | 'uninstall' | 'call' | 'exec';
+}
 
 interface CommandLineProps {
   theme: Theme;
@@ -15,6 +28,7 @@ interface CommandLineProps {
   apps: AndroidApp[];
   scripts: CustomScript[];
   aliases: Alias[];
+  contacts?: ContactItem[];
   history: string[];
   onSubmit: (command: string) => void;
   onClear: () => void;
@@ -28,6 +42,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   apps,
   scripts,
   aliases,
+  contacts = [],
   history,
   onSubmit,
   onClear,
@@ -37,9 +52,10 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   const [input, setInput] = useState('');
   const [historyIndex, setHistoryIndex] = useState<number | null>(null);
   const [savedDraft, setSavedDraft] = useState('');
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<SuggestionItem[]>([]);
   const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState<number>(0);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  const [cursorPosition, setCursorPosition] = useState<number>(0);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -56,7 +72,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     }
   }, [config.autoFocusInput]);
 
-  // All possible autocomplete candidates
+  // All possible autocomplete candidates for 1st word
   const allCandidates = useMemo(() => {
     const appNames = apps.map((a) => a.name.toLowerCase());
     const scriptNames = scripts.map((s) => s.name);
@@ -74,35 +90,227 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       return;
     }
 
+    // 1. Check if user is typing an "open", "launch", or "start" command
+    const openMatch = trimmed.match(/^(open|launch|start|app\s+open)\s*(.*)$/i);
+    if (openMatch) {
+      const query = (openMatch[2] || '').trim().toLowerCase();
+      const matchedApps = query
+        ? apps.filter(
+            (a) =>
+              a.name.toLowerCase().includes(query) ||
+              a.packageName.toLowerCase().includes(query) ||
+              a.category.toLowerCase().includes(query)
+          )
+        : apps;
+
+      const items: SuggestionItem[] = matchedApps.slice(0, 8).map((a) => ({
+        id: `app-open-${a.id}`,
+        type: 'app',
+        label: a.name,
+        subtitle: `${a.packageName} • [${a.category}]`,
+        value: a.name,
+        fullReplacement: `open ${a.name}`,
+        appObj: a,
+        actionKind: 'open',
+      }));
+
+      // If user typed only "open" with no args yet
+      if (!query) {
+        items.unshift({
+          id: 'cmd-open-help',
+          type: 'command',
+          label: 'open <app_name | url>',
+          subtitle: 'Launch Android app or web URL',
+          value: 'open ',
+          fullReplacement: 'open ',
+        });
+      }
+
+      setSuggestions(items);
+      setSelectedSuggestionIdx(0);
+      setShowSuggestions(items.length > 0);
+      return;
+    }
+
+    // 2. Check if user is typing "uninstall", "remove-app", "pm uninstall", "pkg uninstall"
+    const uninstallMatch = trimmed.match(/^(uninstall|remove-app|pm\s+uninstall|pkg\s+uninstall)\s*(.*)$/i);
+    if (uninstallMatch) {
+      const query = (uninstallMatch[2] || '').trim().toLowerCase();
+      const matchedApps = query
+        ? apps.filter(
+            (a) =>
+              a.name.toLowerCase().includes(query) ||
+              a.packageName.toLowerCase().includes(query) ||
+              a.category.toLowerCase().includes(query)
+          )
+        : apps;
+
+      const items: SuggestionItem[] = matchedApps.slice(0, 8).map((a) => ({
+        id: `app-uninstall-${a.id}`,
+        type: 'uninstall',
+        label: a.name,
+        subtitle: `Remove ${a.packageName}`,
+        value: a.name,
+        fullReplacement: `uninstall ${a.name}`,
+        appObj: a,
+        actionKind: 'uninstall',
+      }));
+
+      if (!query) {
+        items.unshift({
+          id: 'cmd-uninstall-help',
+          type: 'command',
+          label: 'uninstall <app_name | package>',
+          subtitle: 'Remove app package from launcher',
+          value: 'uninstall ',
+          fullReplacement: 'uninstall ',
+        });
+      }
+
+      setSuggestions(items);
+      setSelectedSuggestionIdx(0);
+      setShowSuggestions(items.length > 0);
+      return;
+    }
+
+    // 3. Check if user is typing a phone call or dial command: "call" or "dial"
+    const callMatch = trimmed.match(/^(call|dial)(\s+(.*))?$/i);
+    if (callMatch) {
+      const query = (callMatch[3] ? callMatch[3].trim() : '').toLowerCase();
+      const cleanDigits = query.replace(/\D/g, '');
+
+      let matchedContacts = contacts;
+      if (query) {
+        matchedContacts = contacts.filter((c) => {
+          const nameMatches = c.name.toLowerCase().includes(query);
+          const phoneClean = c.phone.replace(/\D/g, '');
+          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
+          const emailMatches = c.email.toLowerCase().includes(query);
+          return nameMatches || phoneMatches || emailMatches;
+        });
+      }
+
+      const items: SuggestionItem[] = matchedContacts.slice(0, 8).map((c) => ({
+        id: `contact-${c.id}`,
+        type: 'contact',
+        label: c.name,
+        subtitle: c.phone,
+        phoneNumber: c.phone,
+        value: c.phone,
+        fullReplacement: `call ${c.phone}`,
+        actionKind: 'call',
+      }));
+
+      // If user typed custom digits (like 9614044766) and it's not already in contacts
+      if (cleanDigits.length >= 3) {
+        const hasExact = matchedContacts.some((c) => c.phone.replace(/\D/g) === cleanDigits);
+        if (!hasExact) {
+          items.unshift({
+            id: `direct-dial-${cleanDigits}`,
+            type: 'contact',
+            label: `Dial ${query}`,
+            subtitle: 'Direct Number',
+            phoneNumber: query,
+            value: query,
+            fullReplacement: `call ${query}`,
+            actionKind: 'call',
+          });
+        }
+      }
+
+      // If typed exactly "call" with no space yet
+      if (trimmed.toLowerCase() === 'call' || trimmed.toLowerCase() === 'dial') {
+        items.unshift({
+          id: 'cmd-call',
+          type: 'command',
+          label: trimmed.toLowerCase(),
+          subtitle: 'Phone dialer',
+          value: trimmed.toLowerCase(),
+          fullReplacement: `${trimmed.toLowerCase()} `,
+        });
+      }
+
+      setSuggestions(items);
+      setSelectedSuggestionIdx(0);
+      setShowSuggestions(items.length > 0);
+      return;
+    }
+
     const words = trimmed.split(/\s+/);
     const lastWord = words[words.length - 1];
 
     if (words.length === 1) {
-      // Autocompleting command or app name
+      // Direct command or direct app name autocompletion
       const matches = allCandidates
         .filter((c) => c.toLowerCase().startsWith(lastWord.toLowerCase()) && c.toLowerCase() !== lastWord.toLowerCase())
         .slice(0, 8);
-      setSuggestions(matches);
+
+      const items: SuggestionItem[] = matches.map((m) => {
+        const matchedApp = apps.find((a) => a.name.toLowerCase() === m.toLowerCase());
+        let type: SuggestionItem['type'] = 'command';
+        let actionKind: SuggestionItem['actionKind'] = undefined;
+        let subtitle: string | undefined = undefined;
+
+        if (matchedApp) {
+          type = 'app';
+          actionKind = 'open';
+          subtitle = `${matchedApp.packageName} • [Launch Direct]`;
+        } else if (scripts.some((s) => s.name === m)) {
+          type = 'file';
+          subtitle = 'Virtual Shell Script';
+        }
+
+        return {
+          id: `cmd-${m}`,
+          type,
+          label: matchedApp ? matchedApp.name : m,
+          subtitle,
+          value: matchedApp ? matchedApp.name : m,
+          fullReplacement: matchedApp ? `${matchedApp.name}` : `${m} `,
+          appObj: matchedApp,
+          actionKind,
+        };
+      });
+
+      setSuggestions(items);
       setSelectedSuggestionIdx(0);
-      setShowSuggestions(matches.length > 0);
+      setShowSuggestions(items.length > 0);
     } else {
       // Autocompleting arguments, files, or subcommands
       const prevWord = words[words.length - 2].toLowerCase();
-      if (['open', 'launch', 'app'].includes(prevWord)) {
-        const appMatches = apps
-          .map((a) => a.name.toLowerCase())
-          .filter((name) => name.startsWith(lastWord.toLowerCase()) && name !== lastWord.toLowerCase());
-        setSuggestions(appMatches);
-        setShowSuggestions(appMatches.length > 0);
-      } else if (['cat', 'nano', 'vim', 'edit', 'run', 'rm', 'ls'].includes(prevWord)) {
+      if (['cat', 'nano', 'vim', 'edit', 'run', 'rm', 'ls'].includes(prevWord)) {
         const fsFiles = (virtualFS.listDir('.').files || [])
           .map((f) => (f.type === 'dir' ? `${f.name}/` : f.name))
-          .filter((f) => f.toLowerCase().startsWith(lastWord.toLowerCase()) && f !== lastWord);
+          .filter((f) => f.toLowerCase().startsWith(lastWord.toLowerCase()) && f !== lastWord)
+          .map((f) => ({
+            id: `file-${f}`,
+            type: 'file' as const,
+            label: f,
+            value: f,
+          }));
         setSuggestions(fsFiles);
         setShowSuggestions(fsFiles.length > 0);
       } else if (prevWord === 'theme') {
-        const themeMatches = ['matrix-crt', 'cyberpunk-2077', 'termux-green', 'dracula', 'nord', 'gruvbox-dark', 'amber-phosphor', 'catppuccin-mocha', 'monokai-pro', 'gameboy-retro']
-          .filter((t) => t.startsWith(lastWord.toLowerCase()));
+        const themeMatches = [
+          'matrix-crt',
+          'cyberpunk-2077',
+          'termux-green',
+          'dracula',
+          'nord',
+          'gruvbox-dark',
+          'amber-phosphor',
+          'catppuccin-mocha',
+          'monokai-pro',
+          'gameboy-retro',
+        ]
+          .filter((t) => t.startsWith(lastWord.toLowerCase()))
+          .map((t) => ({
+            id: `theme-${t}`,
+            type: 'theme' as const,
+            label: t,
+            value: t,
+            fullReplacement: `theme ${t}`,
+          }));
         setSuggestions(themeMatches);
         setShowSuggestions(themeMatches.length > 0);
       } else {
@@ -110,20 +318,74 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         setShowSuggestions(false);
       }
     }
-  }, [input, allCandidates, apps]);
+  }, [input, allCandidates, apps, contacts, scripts]);
+
+  // Compute Inline Ghost Suggestion (Zsh/Fish style)
+  const inlineGhostText = useMemo(() => {
+    if (!input || !input.trim()) return '';
+
+    // If we have active suggestions, use the top suggestion's replacement
+    if (suggestions.length > 0) {
+      const top = suggestions[selectedSuggestionIdx % suggestions.length] || suggestions[0];
+      const targetStr = top.fullReplacement || top.value;
+
+      if (targetStr && targetStr.toLowerCase().startsWith(input.toLowerCase())) {
+        return targetStr.slice(input.length);
+      }
+    }
+
+    // Fallback: check recent command history matching current input
+    const historyMatch = history.slice().reverse().find((h) => h.toLowerCase().startsWith(input.toLowerCase()) && h !== input);
+    if (historyMatch) {
+      return historyMatch.slice(input.length);
+    }
+
+    // Fallback: check all candidates for prefix match
+    const candMatch = allCandidates.find((c) => c.toLowerCase().startsWith(input.toLowerCase()) && c.toLowerCase() !== input.toLowerCase());
+    if (candMatch) {
+      return candMatch.slice(input.length);
+    }
+
+    return '';
+  }, [input, suggestions, selectedSuggestionIdx, history, allCandidates]);
 
   // Apply chosen suggestion
-  const applySuggestion = (suggestion: string) => {
-    const words = input.split(/\s+/);
-    if (words.length <= 1) {
-      setInput(suggestion + ' ');
+  const applySuggestion = (item: SuggestionItem) => {
+    let nextValue = '';
+    if (item.fullReplacement) {
+      nextValue = item.fullReplacement;
     } else {
-      words[words.length - 1] = suggestion;
-      setInput(words.join(' ') + ' ');
+      const words = input.split(/\s+/);
+      if (words.length <= 1) {
+        nextValue = item.value + ' ';
+      } else {
+        words[words.length - 1] = item.value;
+        nextValue = words.join(' ') + ' ';
+      }
     }
+
+    setInput(nextValue);
     setShowSuggestions(false);
     inputRef.current?.focus();
     if (config.soundEnabled) soundManager.playKeyClick(config.soundType, config.soundVolume);
+  };
+
+  // Accept full inline ghost completion
+  const acceptInlineGhost = () => {
+    if (!inlineGhostText) return;
+    const full = input + inlineGhostText;
+    setInput(full.endsWith(' ') ? full : `${full} `);
+    setShowSuggestions(false);
+    inputRef.current?.focus();
+    if (config.soundEnabled) soundManager.playKeyClick(config.soundType, config.soundVolume);
+  };
+
+  // Direct instant execution (for quick launch/call/uninstall tap)
+  const directExecute = (cmd: string) => {
+    setInput('');
+    setShowSuggestions(false);
+    setHistoryIndex(null);
+    onSubmit(cmd);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -135,15 +397,27 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     // Tab autocomplete
     if (e.key === 'Tab') {
       e.preventDefault();
-      if (suggestions.length > 0) {
+      if (inlineGhostText) {
+        acceptInlineGhost();
+      } else if (suggestions.length > 0) {
         applySuggestion(suggestions[selectedSuggestionIdx % suggestions.length]);
       }
       return;
     }
 
+    // ArrowRight at end of line accepts inline ghost completion
+    if (e.key === 'ArrowRight' && inlineGhostText) {
+      const isAtEnd = e.currentTarget.selectionStart === input.length;
+      if (isAtEnd) {
+        e.preventDefault();
+        acceptInlineGhost();
+        return;
+      }
+    }
+
     // Arrow Navigation inside suggestions dropdown
     if (showSuggestions && suggestions.length > 0) {
-      if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === input.length) {
+      if (e.key === 'ArrowRight' && e.currentTarget.selectionStart === input.length && !inlineGhostText) {
         e.preventDefault();
         setSelectedSuggestionIdx((prev) => (prev + 1) % suggestions.length);
         return;
@@ -244,7 +518,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       case 'operator':
         return theme.errorColor;
       case 'number':
-        return '#f97316'; // orange
+        return '#f97316';
       case 'path':
         return theme.infoColor;
       default:
@@ -253,46 +527,191 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   };
 
   const currentDisplayPath = virtualFS.getDisplayPwd();
+  const isCallActive = input.trimStart().toLowerCase().startsWith('call') || input.trimStart().toLowerCase().startsWith('dial');
+  const isOpenActive = input.trimStart().toLowerCase().startsWith('open') || input.trimStart().toLowerCase().startsWith('launch');
+  const isUninstallActive = input.trimStart().toLowerCase().startsWith('uninstall') || input.trimStart().toLowerCase().startsWith('remove-app');
 
   return (
     <div className="relative w-full shrink-0 font-mono text-sm">
-      {/* Suggestions Autocomplete popup */}
+      {/* Suggestions & Interactive Action Popover */}
       {showSuggestions && suggestions.length > 0 && (
         <div
           id="autocomplete-suggestions"
-          className="absolute bottom-full left-4 mb-2 max-w-md bg-opacity-95 backdrop-blur-md rounded border shadow-xl p-1.5 flex flex-wrap gap-1.5 z-30"
+          className="absolute bottom-full left-0 right-0 sm:left-4 sm:right-auto max-h-64 overflow-y-auto mb-2 sm:max-w-xl bg-opacity-95 backdrop-blur-md rounded border shadow-2xl p-2 z-30 flex flex-col gap-1.5"
           style={{
             backgroundColor: theme.cardBg,
             borderColor: theme.borderColor,
             color: theme.fg,
           }}
         >
-          <div className="w-full text-[10px] uppercase font-bold opacity-60 px-1 flex items-center justify-between border-b pb-1 mb-1" style={{ borderColor: theme.borderColor }}>
-            <span>Tab Suggestions</span>
-            <span>[Tab] to complete</span>
+          {/* Header */}
+          <div
+            className="w-full text-[10px] uppercase font-bold opacity-75 px-1 flex items-center justify-between border-b pb-1 mb-0.5"
+            style={{ borderColor: theme.borderColor }}
+          >
+            <span className="flex items-center gap-1.5">
+              {isOpenActive ? (
+                <AppWindow size={11} className="text-cyan-400" />
+              ) : isUninstallActive ? (
+                <Trash2 size={11} className="text-red-400" />
+              ) : isCallActive ? (
+                <Phone size={11} className="text-emerald-400" />
+              ) : (
+                <Sparkles size={11} />
+              )}
+              <span>
+                {isOpenActive
+                  ? 'Application Launcher • [Tab] Complete or Tap [Launch]'
+                  : isUninstallActive
+                  ? 'Package Uninstaller • Tap [Uninstall] or [Tab]'
+                  : isCallActive
+                  ? 'Contacts Directory • [Tab] Select or Tap 📞'
+                  : 'Inline Suggestions'}
+              </span>
+            </span>
+            <span className="text-[9px] opacity-60 font-mono">[Tab] / [→] autocomplete • [Enter] run</span>
           </div>
-          {suggestions.map((s, idx) => {
-            const isSelected = idx === selectedSuggestionIdx;
-            return (
-              <button
-                key={s}
-                id={`suggestion-${s}`}
-                onClick={() => applySuggestion(s)}
-                className="px-2 py-0.5 text-xs rounded transition-all flex items-center gap-1"
-                style={{
-                  backgroundColor: isSelected ? theme.accentColor : `${theme.borderColor}40`,
-                  color: isSelected ? theme.bg : theme.fg,
-                  fontWeight: isSelected ? 'bold' : 'normal',
-                }}
-              >
-                <span>{s}</span>
-              </button>
-            );
-          })}
+
+          {/* Suggestions List */}
+          <div className="flex flex-wrap sm:flex-col gap-1.5 max-h-52 overflow-y-auto">
+            {suggestions.map((item, idx) => {
+              const isSelected = idx === selectedSuggestionIdx;
+              const isContact = item.type === 'contact';
+              const isApp = item.type === 'app';
+              const isUninstall = item.type === 'uninstall';
+
+              return (
+                <div
+                  key={item.id}
+                  id={`suggestion-${item.id}`}
+                  onClick={() => applySuggestion(item)}
+                  className={`group px-2.5 py-1.5 text-xs rounded border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                    isSelected ? 'ring-1' : ''
+                  }`}
+                  style={{
+                    backgroundColor: isSelected ? `${theme.accentColor}25` : `${theme.bg}bb`,
+                    borderColor: isSelected ? theme.accentColor : `${theme.borderColor}60`,
+                    color: theme.fg,
+                  }}
+                >
+                  <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                    <div
+                      className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-[10px]"
+                      style={{
+                        backgroundColor: isUninstall
+                          ? `${theme.errorColor}25`
+                          : isContact
+                          ? `${theme.successColor}25`
+                          : isApp
+                          ? `${theme.infoColor}25`
+                          : `${theme.accentColor}25`,
+                        color: isUninstall
+                          ? theme.errorColor
+                          : isContact
+                          ? theme.successColor
+                          : isApp
+                          ? theme.infoColor
+                          : theme.accentColor,
+                      }}
+                    >
+                      {isUninstall ? (
+                        <Trash2 size={11} />
+                      ) : isContact ? (
+                        <User size={11} />
+                      ) : isApp ? (
+                        <AppWindow size={11} />
+                      ) : (
+                        <Terminal size={11} />
+                      )}
+                    </div>
+
+                    <div className="flex flex-col min-w-0">
+                      <span
+                        className="font-bold truncate text-xs"
+                        style={{ color: isSelected ? theme.accentColor : theme.fg }}
+                      >
+                        {item.label}
+                      </span>
+                      {item.subtitle && (
+                        <span className="text-[10px] opacity-65 truncate font-mono">
+                          {item.subtitle}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Right side quick action buttons */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {isApp && item.appObj && (
+                      <button
+                        type="button"
+                        title={`Launch ${item.appObj.name} directly`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          directExecute(`open ${item.appObj!.name}`);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        style={{
+                          backgroundColor: `${theme.accentColor}25`,
+                          borderColor: theme.accentColor,
+                          color: theme.accentColor,
+                        }}
+                      >
+                        <Play size={9} />
+                        <span>Launch</span>
+                      </button>
+                    )}
+
+                    {isUninstall && item.appObj && (
+                      <button
+                        type="button"
+                        title={`Uninstall ${item.appObj.name}`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          directExecute(`uninstall ${item.appObj!.name}`);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        style={{
+                          backgroundColor: `${theme.errorColor}25`,
+                          borderColor: theme.errorColor,
+                          color: theme.errorColor,
+                        }}
+                      >
+                        <Trash2 size={9} />
+                        <span>Uninstall</span>
+                      </button>
+                    )}
+
+                    {isContact && item.phoneNumber && (
+                      <button
+                        type="button"
+                        title={`Call ${item.phoneNumber} immediately`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          directExecute(item.fullReplacement || `call ${item.phoneNumber}`);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        style={{
+                          backgroundColor: `${theme.successColor}25`,
+                          borderColor: theme.successColor,
+                          color: theme.successColor,
+                        }}
+                      >
+                        <PhoneCall size={9} />
+                        <span>Call</span>
+                      </button>
+                    )}
+
+                    <span className="text-[9px] opacity-40 font-mono hidden sm:inline">[Tab]</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
-      {/* Main Command Input Box - High Density Style */}
+      {/* Main Command Input Box */}
       <div
         id="command-line-box"
         onClick={() => inputRef.current?.focus()}
@@ -302,39 +721,56 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           borderColor: theme.borderColor,
         }}
       >
-        {/* Android Prompt Prefix: ~/directory ❯ or user@android:$ */}
+        {/* Android Prompt Prefix: ~/directory ❯ */}
         <div className="flex items-center gap-1.5 shrink-0 font-bold select-none text-xs md:text-sm">
-          <span style={{ color: theme.promptColor }}>{currentDisplayPath.startsWith('~') ? currentDisplayPath : `~/${currentDisplayPath}`}</span>
+          <span style={{ color: theme.promptColor }}>
+            {currentDisplayPath.startsWith('~') ? currentDisplayPath : `~/${currentDisplayPath}`}
+          </span>
           <span className="text-white">❯</span>
         </div>
 
-        {/* Input Wrapper with live syntax highlighting layer */}
+        {/* Input Wrapper with live syntax highlighting & Ghost Text layer */}
         <div className="relative flex-1 min-h-[22px] flex items-center overflow-hidden">
-          {/* Syntax Highlighting Token Layer */}
+          {/* Syntax Highlighting & Inline Ghost Completion Layer */}
           <div
             className="absolute inset-0 pointer-events-none whitespace-pre-wrap break-all select-none flex items-center"
             aria-hidden="true"
           >
             {tokens.length === 0 ? (
-              <span className="opacity-40 italic text-xs">type 'help', 'apps', 'weather', or command...</span>
+              <span className="opacity-40 italic text-xs">
+                type 'open camera', 'uninstall spotify', 'call 9614044766', 'help'...
+              </span>
             ) : (
-              tokens.map((token, i) => (
+              <>
+                {tokens.map((token, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      color: getTokenColor(token.type),
+                      fontWeight: token.type === 'command' || token.type === 'operator' ? '600' : '400',
+                    }}
+                  >
+                    {token.text}
+                  </span>
+                ))}
+
+                {/* Pulsing cursor block */}
                 <span
-                  key={i}
-                  style={{
-                    color: getTokenColor(token.type),
-                    fontWeight: token.type === 'command' || token.type === 'operator' ? '600' : '400',
-                  }}
-                >
-                  {token.text}
-                </span>
-              ))
+                  className="inline-block w-2 h-4.5 animate-pulse ml-0.5 shrink-0"
+                  style={{ backgroundColor: theme.cursorColor }}
+                />
+
+                {/* Inline Ghost Suggestion (Fish / Zsh autosuggestion style) */}
+                {inlineGhostText && (
+                  <span
+                    className="opacity-40 italic ml-0.5 select-none font-mono"
+                    style={{ color: theme.fg }}
+                  >
+                    {inlineGhostText}
+                  </span>
+                )}
+              </>
             )}
-            {/* Pulsing cursor block for High Density look */}
-            <span
-              className="inline-block w-2 h-4.5 animate-pulse ml-0.5"
-              style={{ backgroundColor: theme.cursorColor }}
-            />
           </div>
 
           {/* Actual transparent HTML input for seamless typing */}
@@ -343,8 +779,13 @@ export const CommandLine: React.FC<CommandLineProps> = ({
             ref={inputRef}
             type="text"
             value={input}
-            onChange={(e) => setInput(e.target.value)}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setCursorPosition(e.target.selectionStart || 0);
+            }}
             onKeyDown={handleKeyDown}
+            onClick={(e) => setCursorPosition(e.currentTarget.selectionStart || 0)}
+            onKeyUp={(e) => setCursorPosition(e.currentTarget.selectionStart || 0)}
             autoFocus
             autoComplete="off"
             autoCorrect="off"
@@ -357,7 +798,28 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           />
         </div>
 
-        {/* Right side Line/Col Indicator */}
+        {/* Right side inline completion badge hint */}
+        {inlineGhostText && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              acceptInlineGhost();
+            }}
+            className="text-[10px] px-1.5 py-0.5 rounded border border-dashed opacity-75 hover:opacity-100 flex items-center gap-1 font-mono transition-opacity shrink-0"
+            style={{
+              borderColor: theme.borderColor,
+              backgroundColor: `${theme.accentColor}15`,
+              color: theme.accentColor,
+            }}
+            title="Press [Tab] or [→] to complete"
+          >
+            <span>[Tab]</span>
+            <ArrowRight size={10} />
+          </button>
+        )}
+
+        {/* Line/Col Indicator */}
         <span className="text-[10px] opacity-40 shrink-0 font-mono hidden sm:inline select-none">
           L:{history.length + 1} C:{input.length}
         </span>

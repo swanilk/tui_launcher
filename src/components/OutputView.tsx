@@ -5,7 +5,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { TerminalLine, Theme, AndroidApp } from '../types';
-import { Sparkles, Terminal, CheckCircle2, AlertCircle, Play, Info } from 'lucide-react';
+import { Sparkles, Terminal, CheckCircle2, AlertCircle, Play, Info, Phone, PhoneCall, PhoneOutgoing, MessageSquare, RotateCw, Trash2, AppWindow } from 'lucide-react';
 
 interface OutputViewProps {
   lines: TerminalLine[];
@@ -61,7 +61,204 @@ export const OutputView: React.FC<OutputViewProps> = ({
           </div>
         );
 
-      case 'success':
+      case 'success': {
+        if (line.metadata?.action === 'call') {
+          const dialNumber = line.metadata.cleanPhone || line.metadata.phone;
+          return (
+            <div
+              className="p-3 rounded border my-2 text-xs md:text-sm shadow-md font-mono flex flex-col gap-2.5"
+              style={{
+                backgroundColor: `${theme.successColor}12`,
+                borderColor: `${theme.successColor}60`,
+                color: theme.fg,
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: `${theme.successColor}30` }}>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center animate-pulse"
+                    style={{ backgroundColor: `${theme.successColor}25`, color: theme.successColor }}
+                  >
+                    <PhoneOutgoing size={15} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm" style={{ color: theme.successColor }}>
+                      {line.metadata.name || 'Direct Number'}
+                    </div>
+                    <div className="text-[11px] opacity-75 font-mono">
+                      📞 {line.metadata.phone}
+                    </div>
+                  </div>
+                </div>
+
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                  style={{ backgroundColor: `${theme.successColor}25`, color: theme.successColor }}
+                >
+                  Calling...
+                </span>
+              </div>
+
+              <pre className="font-mono whitespace-pre-wrap break-all text-[11px] opacity-85 leading-relaxed">
+                {line.content}
+              </pre>
+
+              {/* Interactive Telephony Action Buttons */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t" style={{ borderColor: `${theme.successColor}20` }}>
+                <a
+                  id={`dial-link-${line.id}`}
+                  href={`tel:${dialNumber}`}
+                  target="_top"
+                  className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 border transition-transform hover:scale-105 active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: theme.successColor,
+                    borderColor: theme.successColor,
+                    color: theme.bg,
+                  }}
+                >
+                  <PhoneCall size={13} />
+                  <span>Open Phone Dialer ({dialNumber})</span>
+                </a>
+
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand(`call ${dialNumber}`)}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    borderColor: `${theme.borderColor}80`,
+                    backgroundColor: `${theme.cardBg}bb`,
+                    color: theme.fg,
+                  }}
+                >
+                  <RotateCw size={12} />
+                  <span>Redial</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand(`sms ${dialNumber} `)}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    borderColor: `${theme.borderColor}80`,
+                    backgroundColor: `${theme.cardBg}bb`,
+                    color: theme.fg,
+                  }}
+                >
+                  <MessageSquare size={12} />
+                  <span>Send SMS</span>
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        if (line.metadata?.action === 'uninstall') {
+          const app = line.metadata.app as AndroidApp | undefined;
+          return (
+            <div
+              className="p-3 rounded border my-2 text-xs md:text-sm shadow-md font-mono flex flex-col gap-2"
+              style={{
+                backgroundColor: `${theme.errorColor}10`,
+                borderColor: `${theme.errorColor}50`,
+                color: theme.fg,
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: `${theme.errorColor}30` }}>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-7 h-7 rounded flex items-center justify-center"
+                    style={{ backgroundColor: `${theme.errorColor}25`, color: theme.errorColor }}
+                  >
+                    <Trash2 size={15} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm" style={{ color: theme.errorColor }}>
+                      {app?.name || 'Package Uninstalled'}
+                    </div>
+                    <div className="text-[11px] opacity-75 font-mono">
+                      {app?.packageName || 'Android Package Manager'}
+                    </div>
+                  </div>
+                </div>
+
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                  style={{ backgroundColor: `${theme.errorColor}25`, color: theme.errorColor }}
+                >
+                  Removed
+                </span>
+              </div>
+
+              <pre className="font-mono whitespace-pre-wrap break-all text-[11px] opacity-90 leading-relaxed">
+                {line.content}
+              </pre>
+
+              <div className="flex flex-wrap gap-2 pt-1 border-t" style={{ borderColor: `${theme.errorColor}20` }}>
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand('apps')}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    borderColor: `${theme.borderColor}80`,
+                    backgroundColor: `${theme.cardBg}bb`,
+                    color: theme.fg,
+                  }}
+                >
+                  <AppWindow size={12} />
+                  <span>View Installed Apps</span>
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        if (line.metadata?.action === 'open_app') {
+          const app = line.metadata.app as AndroidApp | undefined;
+          return (
+            <div
+              className="p-2.5 rounded border my-1.5 text-xs md:text-sm shadow-sm font-mono flex items-center justify-between gap-3"
+              style={{
+                backgroundColor: `${theme.accentColor}12`,
+                borderColor: `${theme.accentColor}50`,
+                color: theme.fg,
+              }}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className="w-7 h-7 rounded flex items-center justify-center shrink-0"
+                  style={{ backgroundColor: `${theme.accentColor}25`, color: theme.accentColor }}
+                >
+                  <Play size={14} />
+                </div>
+                <div className="min-w-0">
+                  <div className="font-bold truncate" style={{ color: theme.accentColor }}>
+                    Launching {app?.name || 'Application'}
+                  </div>
+                  <div className="text-[11px] opacity-75 truncate font-mono">
+                    {app?.packageName || 'com.android.app'}
+                  </div>
+                </div>
+              </div>
+
+              {app && (
+                <button
+                  type="button"
+                  onClick={() => onOpenApp(app)}
+                  className="px-2.5 py-1 rounded text-xs font-mono shrink-0 flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    backgroundColor: theme.accentColor,
+                    borderColor: theme.accentColor,
+                    color: theme.bg,
+                  }}
+                >
+                  <Play size={11} />
+                  <span>Reopen</span>
+                </button>
+              )}
+            </div>
+          );
+        }
+
         return (
           <div
             className="p-2 rounded border my-1 flex items-start gap-2 text-xs md:text-sm"
@@ -75,6 +272,7 @@ export const OutputView: React.FC<OutputViewProps> = ({
             <pre className="font-mono whitespace-pre-wrap break-all flex-1">{line.content}</pre>
           </div>
         );
+      }
 
       case 'help':
         return (

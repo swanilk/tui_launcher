@@ -9,6 +9,7 @@ export const KNOWN_COMMANDS = new Set([
   'help', '?', 'man',
   'apps', 'app', 'ls-apps',
   'open', 'launch', 'start',
+  'uninstall', 'remove-app', 'pm', 'pkg',
   'call', 'sms', 'dial',
   'search', 'google', 'ddg', 'yt', 'youtube',
   'calc', 'eval',

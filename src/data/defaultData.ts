@@ -101,6 +101,8 @@ export const DEFAULT_CONTACTS: ContactItem[] = [
   { id: 'c-1', name: 'Alex Rivera (Dev Lead)', phone: '+1-555-0192', email: 'alex@techcorp.io' },
   { id: 'c-2', name: 'Dr. Sarah Connor', phone: '+1-555-8392', email: 'sarah@cyberdyne.org' },
   { id: 'c-3', name: 'Elena Rostova', phone: '+44-20-7946-0912', email: 'elena@matrix.net' },
+  { id: 'c-4', name: 'Emergency Support Hotline', phone: '9614044766', email: 'support@android-tui.dev' },
+  { id: 'c-5', name: 'DevOps On-Call', phone: '+1-800-555-0199', email: 'ops@terminal.local' },
 ];
 
 export const INITIAL_FILESYSTEM: VirtualFile[] = [

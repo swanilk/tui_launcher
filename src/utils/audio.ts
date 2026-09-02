@@ -164,6 +164,31 @@ class SoundSynthesizer {
       }
     } catch {}
   }
+
+  playDialTone(volume = 0.25) {
+    if (volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      // Dual-tone multi-frequency (DTMF tone simulation e.g. 770Hz + 1336Hz)
+      const freqs = [770, 1336];
+      freqs.forEach((freq) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(volume * 0.35, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.3);
+      });
+    } catch {}
+  }
 }
 
 export const soundManager = new SoundSynthesizer();
