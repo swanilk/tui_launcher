@@ -5,7 +5,7 @@
 
 import React from 'react';
 import { Theme } from '../types';
-import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, CornerDownLeft, Sparkles, Grid, HelpCircle, X } from 'lucide-react';
+import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, CornerDownLeft, Sparkles, Grid, HelpCircle, X, Home } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
 interface TouchToolbarProps {
@@ -18,6 +18,7 @@ interface TouchToolbarProps {
   onOpenHelp: () => void;
   onOpenNotifications?: () => void;
   onOpenBattery?: () => void;
+  onOpenDefaultLauncher?: () => void;
 }
 
 export const TouchToolbar: React.FC<TouchToolbarProps> = ({
@@ -30,6 +31,7 @@ export const TouchToolbar: React.FC<TouchToolbarProps> = ({
   onOpenHelp,
   onOpenNotifications,
   onOpenBattery,
+  onOpenDefaultLauncher,
 }) => {
   const handleKeyClick = (keyVal: string) => {
     if (soundEnabled) {
@@ -41,7 +43,8 @@ export const TouchToolbar: React.FC<TouchToolbarProps> = ({
   const quickKeys = [
     { label: 'ESC', action: () => handleKeyClick('Escape') },
     { label: 'TAB', action: () => handleKeyClick('Tab'), highlight: true },
-    { label: 'Notif', action: onOpenNotifications || (() => onKeyPress('notifications')), highlight: true },
+    { label: 'Home', action: onOpenDefaultLauncher || (() => onKeyPress('set-default-launcher')), icon: <Home size={11} />, highlight: true },
+    { label: 'Notif', action: onOpenNotifications || (() => onKeyPress('notifications')), highlight: false },
     { label: 'BAT', action: onOpenBattery || (() => onKeyPress('battery monitor')), highlight: false },
     { label: '↑', action: () => handleKeyClick('ArrowUp'), icon: <ArrowUp size={12} /> },
     { label: '↓', action: () => handleKeyClick('ArrowDown'), icon: <ArrowDown size={12} /> },

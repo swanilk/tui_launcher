@@ -48,6 +48,7 @@ import { HistorySearchModal } from './components/HistorySearchModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { BatteryMonitorModal } from './components/BatteryMonitorModal';
 import { CelestialClockModal, CelestialDateTimeSection } from './components/CelestialClock';
+import { DefaultLauncherModal } from './components/DefaultLauncherModal';
 import { MatrixScreen } from './components/MatrixScreen';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { soundManager } from './utils/audio';
@@ -293,6 +294,7 @@ Press [Tab] anytime for auto-completion.`,
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
   const [isBatteryModalOpen, setIsBatteryModalOpen] = useState(false);
   const [isClockModalOpen, setIsClockModalOpen] = useState(false);
+  const [isDefaultLauncherModalOpen, setIsDefaultLauncherModalOpen] = useState(false);
   const [isMatrixActive, setIsMatrixActive] = useState(false);
 
   // 13. Telemetry: Battery and Wifi
@@ -478,6 +480,7 @@ Press [Tab] anytime for auto-completion.`,
         openHistoryModal: () => setIsHistoryModalOpen(true),
         openBatteryModal: () => setIsBatteryModalOpen(true),
         openClockModal: () => setIsClockModalOpen(true),
+        openDefaultLauncherModal: () => setIsDefaultLauncherModalOpen(true),
         togglePowerSaver: () => setPowerSaver((p) => !p),
         setMatrixActive: (active: boolean) => setIsMatrixActive(active),
         activeTab,
@@ -603,6 +606,7 @@ Press [Tab] anytime for auto-completion.`,
           onOpenThemeModal={() => setIsThemeModalOpen(true)}
           onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
           onOpenClockModal={() => setIsClockModalOpen(true)}
+          onOpenDefaultLauncherModal={() => setIsDefaultLauncherModalOpen(true)}
         />
       )}
 
@@ -635,6 +639,7 @@ Press [Tab] anytime for auto-completion.`,
             onUninstallApp={(app) => {
               handleExecuteCommand(`uninstall "${app.name}"`);
             }}
+            onOpenDefaultLauncherModal={() => setIsDefaultLauncherModalOpen(true)}
             soundEnabled={config.soundEnabled}
           />
         )}
@@ -709,6 +714,7 @@ Press [Tab] anytime for auto-completion.`,
             onOpenHelp={() => handleExecuteCommand('help')}
             onOpenNotifications={() => setActiveTab('notifs')}
             onOpenBattery={() => setIsBatteryModalOpen(true)}
+            onOpenDefaultLauncher={() => setIsDefaultLauncherModalOpen(true)}
           />
         )}
       </div>
@@ -800,6 +806,16 @@ Press [Tab] anytime for auto-completion.`,
           config={config}
         />
       )}
+
+      {/* Default Launcher Setup Wizard & PWA Home App Modal */}
+      <DefaultLauncherModal
+        isOpen={isDefaultLauncherModalOpen}
+        onClose={() => setIsDefaultLauncherModalOpen(false)}
+        theme={currentTheme}
+        config={config}
+        onUpdateConfig={(updates) => setConfig((prev) => ({ ...prev, ...updates }))}
+        soundEnabled={config.soundEnabled}
+      />
 
       {/* Matrix Digital Rain Screensaver */}
       {isMatrixActive && <MatrixScreen onExit={() => setIsMatrixActive(false)} />}

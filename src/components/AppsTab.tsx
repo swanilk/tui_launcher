@@ -28,7 +28,8 @@ import {
   Users,
   Package,
   Layers,
-  Sparkles
+  Sparkles,
+  Home
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
 
@@ -39,6 +40,7 @@ interface AppsTabProps {
   onRunCommand: (command: string) => void;
   onToggleFavorite?: (appId: string) => void;
   onUninstallApp?: (app: AndroidApp) => void;
+  onOpenDefaultLauncherModal?: () => void;
   soundEnabled: boolean;
 }
 
@@ -49,6 +51,7 @@ export const AppsTab: React.FC<AppsTabProps> = ({
   onRunCommand,
   onToggleFavorite,
   onUninstallApp,
+  onOpenDefaultLauncherModal,
   soundEnabled,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -231,7 +234,7 @@ export const AppsTab: React.FC<AppsTabProps> = ({
                 if (soundEnabled) soundManager.playKeyClick('mechanical', 0.1);
                 setSelectedCategory(cat.id);
               }}
-              className="px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold whitespace-nowrap transition-all border shrink-0"
+              className="px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold whitespace-nowrap transition-all border shrink-0 cursor-pointer"
               style={{
                 borderColor: isActive ? theme.accentColor : `${theme.borderColor}60`,
                 backgroundColor: isActive ? `${theme.accentColor}25` : 'transparent',
@@ -242,6 +245,27 @@ export const AppsTab: React.FC<AppsTabProps> = ({
             </button>
           );
         })}
+
+        {/* Set as Default Launcher trigger button */}
+        {onOpenDefaultLauncherModal && (
+          <button
+            id="btn-apps-set-default-launcher"
+            onClick={() => {
+              if (soundEnabled) soundManager.playKeyClick('mechanical', 0.2);
+              onOpenDefaultLauncherModal();
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-0.5 rounded text-[10px] sm:text-[11px] font-bold whitespace-nowrap border shrink-0 ml-auto hover:scale-105 active:scale-95 transition-all cursor-pointer"
+            style={{
+              borderColor: `${theme.accentColor}80`,
+              backgroundColor: `${theme.accentColor}20`,
+              color: theme.accentColor,
+            }}
+            title="Configure as default Android Home Launcher"
+          >
+            <Home size={11} />
+            <span>★ SET DEFAULT LAUNCHER</span>
+          </button>
+        )}
       </div>
 
       {/* Main Apps Content Area */}

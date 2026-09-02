@@ -44,6 +44,7 @@ export interface CommandContext {
   openHistoryModal: () => void;
   openBatteryModal?: () => void;
   openClockModal?: () => void;
+  openDefaultLauncherModal?: () => void;
   togglePowerSaver?: () => void;
   setMatrixActive: (active: boolean) => void;
   activeTab?: 'apps' | 'notifs' | 'term';
@@ -243,6 +244,37 @@ Tip: You can press Ctrl+1 (Apps), Ctrl+2 (Notifs), Ctrl+3 (Term) or click the ta
         return {
           type: 'output',
           content: `💻 Terminal Output Session (tty1 • pts/0 • active):\n  Total command history: ${ctx.history.length} logged\n  Ready for commands. Output appears in this tab.`,
+        };
+      }
+
+      // SET DEFAULT LAUNCHER & HOME APP SETUP
+      case 'set-default-launcher':
+      case 'default-launcher':
+      case 'set-default':
+      case 'default':
+      case 'launcher':
+      case 'home-app':
+      case 'sethome':
+      case 'install-launcher':
+      case 'pwa-install':
+      case 'pwa': {
+        if (ctx.openDefaultLauncherModal) {
+          ctx.openDefaultLauncherModal();
+        }
+        return {
+          type: 'success',
+          content: `📱 [DEFAULT LAUNCHER SETUP]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Android Terminal Launcher can be configured as your primary device Home App.
+
+Setup Options:
+  1. Add to Home Screen (PWA Standalone App)
+  2. Android Settings ➔ Apps ➔ Default apps ➔ Home app
+  3. ADB Shell Command:
+     adb shell cmd package set-home-activity com.android.tui.launcher/.MainActivity
+  4. Desktop: chrome://apps / edge://apps ➔ Run on Startup
+
+Opening interactive launcher setup wizard...`,
         };
       }
 
@@ -1104,6 +1136,8 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
         bt: 'bt [on | off | toggle | connect <device> | disconnect | scan | pair]\nShort alias for bluetooth controller suite. Type "bt connect " in the prompt to view paired & nearby devices.',
         hotspot: 'hotspot [on | off | toggle | status | config <ssid> <pass> [band] | clients | pass]\nWi-Fi Mobile Hotspot & USB/Wireless Tethering Controller. Type "hotspot on" to turn on hotspot, "hotspot off" to turn off, "hotspot toggle" to switch state, or "hotspot status" to inspect tethered clients and data usage.',
         tether: 'tether [on | off | toggle | status]\nAlias for hotspot mobile tethering controller.',
+        launcher: 'set-default-launcher / launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app / home screen, install PWA, or configure ADB native home intent.',
+        'set-default': 'set-default-launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app.',
       };
 
       if (docs[topic]) {
@@ -1125,6 +1159,7 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
   open <app|url>        Launch Android app modal or web browser
   uninstall <app>       Uninstall app package
   notifications / notifs Grouped tabular notifications shade
+  set-default-launcher  Configure as default Android home launcher
   call <num|name>       Simulated phone dialer
   sms <num> <msg>       Send text message
   search / google <q>   Search Google, DuckDuckGo (ddg), or YouTube (yt)

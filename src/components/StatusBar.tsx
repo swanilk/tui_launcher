@@ -21,7 +21,8 @@ import {
   BluetoothConnected,
   BluetoothOff,
   Flame,
-  Radio
+  Radio,
+  Home
 } from 'lucide-react';
 import { StatusBarClockPill } from './CelestialClock';
 
@@ -48,6 +49,7 @@ interface StatusBarProps {
   onOpenNotifications?: () => void;
   onOpenBatteryModal?: () => void;
   onOpenClockModal?: () => void;
+  onOpenDefaultLauncherModal?: () => void;
 }
 
 export const StatusBar: React.FC<StatusBarProps> = ({
@@ -71,6 +73,7 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   onOpenNotifications,
   onOpenBatteryModal,
   onOpenClockModal,
+  onOpenDefaultLauncherModal,
 }) => {
   return (
     <header
@@ -183,6 +186,24 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           <Palette size={11} />
           <span className="hidden md:inline">{theme.name.split(' ')[0]}</span>
         </button>
+
+        {/* Set Default Launcher button */}
+        {onOpenDefaultLauncherModal && (
+          <button
+            id="btn-quick-default-launcher"
+            onClick={onOpenDefaultLauncherModal}
+            title="Configure Android Terminal Launcher as default Home App"
+            className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:scale-105 active:scale-95 transition-all border rounded font-semibold cursor-pointer"
+            style={{
+              borderColor: `${theme.accentColor}80`,
+              backgroundColor: `${theme.accentColor}18`,
+              color: theme.accentColor,
+            }}
+          >
+            <Home size={11} />
+            <span className="hidden lg:inline">SET DEFAULT</span>
+          </button>
+        )}
       </div>
 
       {/* Right side: High Density System Metrics (MEM, BAT, CONNECTED) */}
