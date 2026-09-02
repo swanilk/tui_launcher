@@ -133,6 +133,30 @@ export interface BluetoothState {
   discovering: boolean;
 }
 
+export interface HotspotClient {
+  id: string;
+  name: string;
+  ip: string;
+  mac: string;
+  connectedAt: number;
+  dataUsageMb: number;
+}
+
+export interface HotspotState {
+  enabled: boolean;
+  ssid: string;
+  password: string;
+  band: '2.4 GHz' | '5.0 GHz' | '6.0 GHz';
+  channel: number;
+  security: 'WPA3-Personal' | 'WPA2-PSK' | 'Open';
+  ipAddress: string;
+  subnetMask: string;
+  maxClients: number;
+  clients: HotspotClient[];
+  dataSharedMb: number;
+  startedAt?: number;
+}
+
 export interface ActiveTimer {
   id: string;
   label: string;

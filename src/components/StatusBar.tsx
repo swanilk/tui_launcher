@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Theme, LauncherConfig, BluetoothState } from '../types';
+import { Theme, LauncherConfig, BluetoothState, HotspotState } from '../types';
 import { 
   Wifi, 
   Battery, 
@@ -15,11 +15,16 @@ import {
   Palette, 
   Terminal,
   Grid,
+  Bell,
   Clock,
   Bluetooth,
   BluetoothConnected,
-  BluetoothOff
+  BluetoothOff,
+  Flame,
+  Radio
 } from 'lucide-react';
+
+export type MainTabType = 'apps' | 'notifs' | 'term';
 
 interface StatusBarProps {
   theme: Theme;
@@ -29,10 +34,16 @@ interface StatusBarProps {
   powerSaver?: boolean;
   wifiSsid: string;
   bluetoothState?: BluetoothState;
+  hotspotState?: HotspotState;
+  activeTab: MainTabType;
+  onSelectTab: (tab: MainTabType) => void;
+  appsCount?: number;
+  notifsCount?: number;
+  termLinesCount?: number;
   onToggleSound: () => void;
   onToggleCrt: () => void;
   onOpenThemeModal: () => void;
-  onOpenAppLauncher: () => void;
+  onOpenAppLauncher?: () => void;
   onOpenNotifications?: () => void;
   onOpenBatteryModal?: () => void;
 }
@@ -45,6 +56,12 @@ export const StatusBar: React.FC<StatusBarProps> = ({
   powerSaver,
   wifiSsid,
   bluetoothState,
+  hotspotState,
+  activeTab,
+  onSelectTab,
+  appsCount = 0,
+  notifsCount = 0,
+  termLinesCount = 0,
   onToggleSound,
   onToggleCrt,
   onOpenThemeModal,
@@ -94,39 +111,93 @@ export const StatusBar: React.FC<StatusBarProps> = ({
         </span>
       </div>
 
-      {/* Center: Quick interactive shortcuts */}
-      <div className="flex items-center gap-1.5 mx-2">
+      {/* Center: Quick interactive Top Tabs (Apps, Notifs, Term) */}
+      <div className="flex items-center gap-1 sm:gap-1.5 mx-1 sm:mx-2">
+        {/* Apps Tab Button */}
         <button
           id="btn-quick-apps"
-          onClick={onOpenAppLauncher}
-          title="List Installed Apps [CTRL+N]"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border"
-          style={{ borderColor: theme.borderColor, backgroundColor: `${theme.accentColor}10`, color: theme.accentColor }}
+          onClick={() => onSelectTab('apps')}
+          title="Switch to Apps Tab (Ctrl+1)"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          style={{
+            borderColor: activeTab === 'apps' ? theme.accentColor : theme.borderColor,
+            backgroundColor: activeTab === 'apps' ? `${theme.accentColor}30` : `${theme.accentColor}10`,
+            color: activeTab === 'apps' ? theme.accentColor : theme.fg,
+            boxShadow: activeTab === 'apps' ? `0 0 8px ${theme.accentColor}40` : 'none',
+          }}
         >
           <Grid size={11} />
           <span>Apps</span>
+          {appsCount > 0 && (
+            <span 
+              className="text-[9px] px-1 py-0.1 rounded hidden sm:inline"
+              style={{ backgroundColor: `${theme.accentColor}25` }}
+            >
+              {appsCount}
+            </span>
+          )}
         </button>
 
+        {/* Notifs Tab Button */}
         <button
           id="btn-quick-notifs"
-          onClick={onOpenNotifications}
-          title="View Tabular Notifications (cmd: notifications)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border font-bold"
-          style={{ borderColor: theme.promptColor, backgroundColor: `${theme.promptColor}20`, color: theme.promptColor }}
+          onClick={() => onSelectTab('notifs')}
+          title="Switch to Notifications Tab (Ctrl+2)"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          style={{
+            borderColor: activeTab === 'notifs' ? (theme.warningColor || '#ffcc00') : (notifsCount > 0 ? `${theme.warningColor || '#ffcc00'}80` : theme.borderColor),
+            backgroundColor: activeTab === 'notifs' ? `${theme.warningColor || '#ffcc00'}30` : (notifsCount > 0 ? `${theme.warningColor || '#ffcc00'}15` : 'transparent'),
+            color: activeTab === 'notifs' ? (theme.warningColor || '#ffcc00') : (notifsCount > 0 ? (theme.warningColor || '#ffcc00') : theme.fg),
+            boxShadow: activeTab === 'notifs' ? `0 0 8px ${(theme.warningColor || '#ffcc00')}40` : 'none',
+          }}
         >
-          <Terminal size={11} />
+          <Bell size={11} className={notifsCount > 0 ? 'animate-pulse' : ''} />
           <span>Notifs</span>
+          {notifsCount > 0 && (
+            <span 
+              className="text-[9px] px-1 py-0.1 rounded font-bold"
+              style={{ backgroundColor: `${theme.warningColor || '#ffcc00'}30` }}
+            >
+              {notifsCount}
+            </span>
+          )}
         </button>
 
+        {/* Term Tab Button */}
+        <button
+          id="btn-quick-term"
+          onClick={() => onSelectTab('term')}
+          title="Switch to Terminal Output Tab (Ctrl+3)"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded transition-all border hover:scale-105 active:scale-95"
+          style={{
+            borderColor: activeTab === 'term' ? theme.promptColor : theme.borderColor,
+            backgroundColor: activeTab === 'term' ? `${theme.promptColor}30` : `${theme.promptColor}10`,
+            color: activeTab === 'term' ? theme.promptColor : theme.fg,
+            boxShadow: activeTab === 'term' ? `0 0 8px ${theme.promptColor}40` : 'none',
+          }}
+        >
+          <Terminal size={11} className={activeTab === 'term' ? 'text-emerald-400' : ''} />
+          <span>Term</span>
+          {termLinesCount > 0 && (
+            <span 
+              className="text-[9px] px-1 py-0.1 rounded font-mono hidden sm:inline"
+              style={{ backgroundColor: `${theme.promptColor}20` }}
+            >
+              {termLinesCount}
+            </span>
+          )}
+        </button>
+
+        {/* Theme switcher */}
         <button
           id="btn-quick-themes"
           onClick={onOpenThemeModal}
           title="Switch Theme (Alt+T)"
-          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border"
+          className="flex items-center gap-1 px-2 py-0.5 text-[11px] hover:bg-white/10 transition-colors border rounded"
           style={{ borderColor: theme.borderColor, color: theme.fg }}
         >
           <Palette size={11} />
-          <span className="hidden sm:inline">{theme.name.split(' ')[0]}</span>
+          <span className="hidden md:inline">{theme.name.split(' ')[0]}</span>
         </button>
       </div>
 
@@ -174,6 +245,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
                 <span>BT: ON</span>
               </>
             )}
+          </div>
+        )}
+
+        {/* Hotspot Indicator */}
+        {hotspotState?.enabled && (
+          <div
+            id="btn-status-hotspot"
+            className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] sm:text-[11px] font-bold rounded border bg-amber-500/15 border-amber-500/50 text-amber-400 animate-pulse"
+            title={`Hotspot Broadcasting (${hotspotState.ssid}) • ${hotspotState.clients.length} Clients • ${hotspotState.band}`}
+          >
+            <Flame size={11} className="text-amber-400" />
+            <span className="hidden md:inline">AP: {hotspotState.ssid} ({hotspotState.clients.length})</span>
+            <span className="md:hidden">AP: ON</span>
           </div>
         )}
 

@@ -7,14 +7,16 @@ import { SyntaxToken, SyntaxTokenType } from '../types';
 
 export const KNOWN_COMMANDS = new Set([
   'help', '?', 'man',
+  'tab', 'tabs', 'term', 'terminal', 'console',
   'apps', 'app', 'ls-apps',
+  'notifications', 'notifs', 'notif', 'notify', 'alerts', 'alert',
   'open', 'launch', 'start',
   'uninstall', 'remove-app', 'pm', 'pkg',
   'call', 'sms', 'dial',
   'search', 'google', 'ddg', 'yt', 'youtube',
   'calc', 'eval',
   'weather', 'wttr',
-  'wifi', 'bluetooth', 'bt', 'bluetoothctl', 'battery', 'device', 'sysinfo', 'neofetch', 'fastfetch', 'info',
+  'wifi', 'hotspot', 'tether', 'tethering', 'ap', 'bluetooth', 'bt', 'bluetoothctl', 'battery', 'device', 'sysinfo', 'neofetch', 'fastfetch', 'info',
   'alias', 'unalias', 'aliases',
   'theme', 'themes', 'theme-edit', 'theme-custom',
   'history', 'hist',

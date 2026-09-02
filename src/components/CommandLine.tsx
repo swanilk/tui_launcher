@@ -4,7 +4,7 @@
  */
 
 import React, { useRef, useEffect, useState, useMemo } from 'react';
-import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem, RecentCall, BluetoothDevice, BluetoothState } from '../types';
+import { Theme, LauncherConfig, AndroidApp, CustomScript, Alias, ContactItem, RecentCall, BluetoothDevice, BluetoothState, HotspotState } from '../types';
 import { tokenizeCommand, KNOWN_COMMANDS } from '../utils/syntaxHighlight';
 import { soundManager } from '../utils/audio';
 import { virtualFS } from '../utils/fileSystem';
@@ -27,7 +27,9 @@ import {
   BluetoothConnected,
   BluetoothOff,
   BluetoothSearching,
-  Power
+  Power,
+  Flame,
+  Radio
 } from 'lucide-react';
 
 function formatTimeAgo(ts: number): string {
@@ -63,6 +65,7 @@ interface CommandLineProps {
   contacts?: ContactItem[];
   recentCalls?: RecentCall[];
   bluetoothState?: BluetoothState;
+  hotspotState?: HotspotState;
   history: string[];
   onSubmit: (command: string) => void;
   onClear: () => void;
@@ -79,6 +82,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   contacts = [],
   recentCalls = [],
   bluetoothState,
+  hotspotState,
   history,
   onSubmit,
   onClear,
@@ -520,6 +524,93 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         setShowSuggestions(true);
         return;
       }
+    }
+
+    // 5. Check if user is typing a hotspot / tethering command: "hotspot", "tether", "tethering", "ap"
+    const hsMatch = trimmed.match(/^(hotspot|tether|tethering|ap)(\s+(.*))?$/i);
+    if (hsMatch) {
+      const hsCmd = hsMatch[1].toLowerCase();
+      const rest = (hsMatch[3] ? hsMatch[3].trim() : '').toLowerCase();
+      const isEnabled = hotspotState?.enabled ?? false;
+      const hsSsid = hotspotState?.ssid || 'AndroidAP_Terminal';
+      const hsPass = hotspotState?.password || 'tether_pass_2026';
+      const clientsCount = hotspotState?.clients?.length || 0;
+      const items: SuggestionItem[] = [];
+
+      // Subcommand suggestions
+      items.push({
+        id: 'hs-toggle-power',
+        type: 'subcommand',
+        label: `${hsCmd} ${isEnabled ? 'off' : 'on'}`,
+        subtitle: `Turn ${isEnabled ? 'OFF' : 'ON'} Wi-Fi Hotspot Tethering (Currently ${isEnabled ? 'ACTIVE / BROADCASTING' : 'OFF'})`,
+        value: `${hsCmd} ${isEnabled ? 'off' : 'on'}`,
+        fullReplacement: `${hsCmd} ${isEnabled ? 'off' : 'on'}`,
+      });
+
+      if (!isEnabled) {
+        items.push({
+          id: 'hs-on',
+          type: 'subcommand',
+          label: `${hsCmd} on`,
+          subtitle: `Enable SoftAP broadcasting ("${hsSsid}" • ${hotspotState?.band || '5.0 GHz'})`,
+          value: `${hsCmd} on`,
+          fullReplacement: `${hsCmd} on`,
+        });
+      } else {
+        items.push({
+          id: 'hs-off',
+          type: 'subcommand',
+          label: `${hsCmd} off`,
+          subtitle: `Disable Hotspot radio & disconnect ${clientsCount} connected clients`,
+          value: `${hsCmd} off`,
+          fullReplacement: `${hsCmd} off`,
+        });
+      }
+
+      items.push({
+        id: 'hs-status',
+        type: 'subcommand',
+        label: `${hsCmd} status`,
+        subtitle: `View telemetry, gateway IP, WPA key, and active client lease table`,
+        value: `${hsCmd} status`,
+        fullReplacement: `${hsCmd} status`,
+      });
+
+      items.push({
+        id: 'hs-clients',
+        type: 'subcommand',
+        label: `${hsCmd} clients`,
+        subtitle: `List connected client devices and per-device data consumption (${clientsCount} active)`,
+        value: `${hsCmd} clients`,
+        fullReplacement: `${hsCmd} clients`,
+      });
+
+      items.push({
+        id: 'hs-config',
+        type: 'subcommand',
+        label: `${hsCmd} config <ssid> [password] [band]`,
+        subtitle: `Configure network name, security passphrase, and frequency band (2.4/5.0 GHz)`,
+        value: `${hsCmd} config `,
+        fullReplacement: `${hsCmd} config `,
+      });
+
+      items.push({
+        id: 'hs-pass',
+        type: 'subcommand',
+        label: `${hsCmd} pass`,
+        subtitle: `View current WPA3/WPA2 security passphrase ("${hsPass}")`,
+        value: `${hsCmd} pass`,
+        fullReplacement: `${hsCmd} pass`,
+      });
+
+      const filtered = rest
+        ? items.filter((i) => i.label.toLowerCase().includes(rest) || i.value.toLowerCase().includes(rest))
+        : items;
+
+      setSuggestions(filtered.length > 0 ? filtered : items);
+      setSelectedSuggestionIdx(0);
+      setShowSuggestions(true);
+      return;
     }
 
     const words = trimmed.split(/\s+/);

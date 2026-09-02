@@ -18,7 +18,8 @@ import {
   ActiveTimer,
   BatteryTelemetry,
   AppNotification,
-  BluetoothState
+  BluetoothState,
+  HotspotState
 } from './types';
 import { DEFAULT_THEMES } from './data/themes';
 import { DEFAULT_APPS } from './data/defaultApps';
@@ -31,23 +32,29 @@ import {
   DEFAULT_CONTACTS,
   DEFAULT_RECENT_CALLS,
   DEFAULT_NOTIFICATIONS,
-  DEFAULT_BLUETOOTH_STATE
+  DEFAULT_BLUETOOTH_STATE,
+  DEFAULT_HOTSPOT_STATE
 } from './data/defaultData';
-import { StatusBar } from './components/StatusBar';
+import { StatusBar, MainTabType } from './components/StatusBar';
 import { CommandLine } from './components/CommandLine';
 import { OutputView } from './components/OutputView';
 import { TouchToolbar } from './components/TouchToolbar';
+import { AppsTab } from './components/AppsTab';
+import { NotifsTab } from './components/NotifsTab';
+import { TermTab } from './components/TermTab';
 import { AppViewerModal } from './components/AppViewerModal';
 import { NanoEditor } from './components/NanoEditor';
 import { HistorySearchModal } from './components/HistorySearchModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
 import { BatteryMonitorModal } from './components/BatteryMonitorModal';
 import { MatrixScreen } from './components/MatrixScreen';
-import { HighDensityHud } from './components/HighDensityHud';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { soundManager } from './utils/audio';
 
 export default function App() {
+  // Active Main Tab: 'apps' | 'notifs' | 'term'
+  const [activeTab, setActiveTab] = useState<MainTabType>('term');
+
   // 1. Persistent Launcher Configurations
   const [config, setConfig] = useState<LauncherConfig>(() => {
     try {
@@ -224,6 +231,22 @@ export default function App() {
     } catch {}
   }, [bluetoothState]);
 
+  // 8d. Persistent Hotspot State
+  const [hotspotState, setHotspotState] = useState<HotspotState>(() => {
+    try {
+      const stored = localStorage.getItem('android_tui_hotspot');
+      return stored ? JSON.parse(stored) : DEFAULT_HOTSPOT_STATE;
+    } catch {
+      return DEFAULT_HOTSPOT_STATE;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('android_tui_hotspot', JSON.stringify(hotspotState));
+    } catch {}
+  }, [hotspotState]);
+
   // 9. Active Timers
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
 
@@ -358,11 +381,41 @@ Press [Tab] anytime for auto-completion.`,
     return () => clearInterval(interval);
   }, []);
 
+  // Global keyboard shortcuts for tab navigation (Ctrl+1, Ctrl+2, Ctrl+3)
+  useEffect(() => {
+    const handleGlobalShortcuts = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.altKey) && e.key === '1') {
+        e.preventDefault();
+        setActiveTab('apps');
+      } else if ((e.ctrlKey || e.altKey) && e.key === '2') {
+        e.preventDefault();
+        setActiveTab('notifs');
+      } else if ((e.ctrlKey || e.altKey) && e.key === '3') {
+        e.preventDefault();
+        setActiveTab('term');
+      }
+    };
+
+    window.addEventListener('keydown', handleGlobalShortcuts);
+    return () => window.removeEventListener('keydown', handleGlobalShortcuts);
+  }, []);
+
   // 15. Command Execution Callback
   const handleExecuteCommand = useCallback(
     async (rawCommand: string) => {
       const trimmed = rawCommand.trim();
       if (!trimmed) return;
+
+      // Automatically route tab view based on command:
+      const cmdFirst = trimmed.split(' ')[0].toLowerCase();
+      if (cmdFirst === 'apps' || cmdFirst === 'drawer' || (cmdFirst === 'tab' && trimmed.toLowerCase().includes('app'))) {
+        setActiveTab('apps');
+      } else if (cmdFirst === 'notifications' || cmdFirst === 'notifs' || cmdFirst === 'notif' || (cmdFirst === 'tab' && trimmed.toLowerCase().includes('notif'))) {
+        setActiveTab('notifs');
+      } else {
+        // "All command output should appear in that tab." -> automatically switch to 'term' tab!
+        setActiveTab('term');
+      }
 
       // Append command to persistent history
       setHistory((prev) => {
@@ -408,6 +461,8 @@ Press [Tab] anytime for auto-completion.`,
         setRecentCalls,
         bluetoothState,
         setBluetoothState,
+        hotspotState,
+        setHotspotState,
         timers,
         setTimers,
         notifications,
@@ -422,6 +477,8 @@ Press [Tab] anytime for auto-completion.`,
         openBatteryModal: () => setIsBatteryModalOpen(true),
         togglePowerSaver: () => setPowerSaver((p) => !p),
         setMatrixActive: (active: boolean) => setIsMatrixActive(active),
+        activeTab,
+        setActiveTab,
         batteryLevel,
         isCharging,
         batteryData: batteryTelemetry,
@@ -522,7 +579,7 @@ Press [Tab] anytime for auto-completion.`,
         <div className="absolute inset-0 crt-scanlines crt-vignette z-40 pointer-events-none" />
       )}
 
-      {/* Top Android Status Bar */}
+      {/* Top Android Status Bar with Apps, Notifs, and Term Tabs */}
       {config.showStatusBar && (
         <StatusBar
           theme={currentTheme}
@@ -532,19 +589,67 @@ Press [Tab] anytime for auto-completion.`,
           powerSaver={powerSaver}
           wifiSsid={wifiSsid}
           bluetoothState={bluetoothState}
+          hotspotState={hotspotState}
+          activeTab={activeTab}
+          onSelectTab={(tab) => setActiveTab(tab)}
+          appsCount={apps.length}
+          notifsCount={notifications.length}
+          termLinesCount={lines.length}
           onToggleSound={() => setConfig((prev) => ({ ...prev, soundEnabled: !prev.soundEnabled }))}
           onToggleCrt={() => setConfig((prev) => ({ ...prev, crtEffect: !prev.crtEffect }))}
           onOpenThemeModal={() => setIsThemeModalOpen(true)}
-          onOpenAppLauncher={() => handleExecuteCommand('apps')}
-          onOpenNotifications={() => handleExecuteCommand('notifications')}
           onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
         />
       )}
 
-      {/* Main Terminal Output & High Density Aside HUD */}
-      <main className="flex-1 flex gap-3 sm:gap-5 min-h-0 overflow-hidden px-2.5 sm:px-4 py-2">
-        <section className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
-          <OutputView
+      {/* Main Tab Content View: Apps, Notifs, Term */}
+      <main className="flex-1 min-h-0 overflow-hidden px-2 sm:px-3 py-1 flex flex-col">
+        {activeTab === 'apps' && (
+          <AppsTab
+            theme={currentTheme}
+            apps={apps}
+            onOpenApp={(app) => {
+              if (app.launchAction === 'command' && app.commandToRun) {
+                handleExecuteCommand(app.commandToRun);
+              } else {
+                setActiveAppModal(app);
+              }
+            }}
+            onRunCommand={handleExecuteCommand}
+            onToggleFavorite={(appId) => {
+              setApps((prev) =>
+                prev.map((a) => (a.id === appId ? { ...a, favorite: !a.favorite } : a))
+              );
+            }}
+            onUninstallApp={(app) => {
+              handleExecuteCommand(`uninstall "${app.name}"`);
+            }}
+            soundEnabled={config.soundEnabled}
+          />
+        )}
+
+        {activeTab === 'notifs' && (
+          <NotifsTab
+            theme={currentTheme}
+            notifications={notifications}
+            onDismissNotification={(id) => {
+              setNotifications((prev) => prev.filter((n) => n.id !== id));
+            }}
+            onClearAllNotifications={() => {
+              setNotifications([]);
+            }}
+            onAddNotification={(notif) => {
+              setNotifications((prev) => [notif, ...prev]);
+            }}
+            onRunCommand={handleExecuteCommand}
+            onOpenApp={(app) => setActiveAppModal(app)}
+            apps={apps}
+            soundEnabled={config.soundEnabled}
+          />
+        )}
+
+        {activeTab === 'term' && (
+          <TermTab
             lines={lines}
             theme={currentTheme}
             onRunQuickCommand={handleExecuteCommand}
@@ -555,30 +660,11 @@ Press [Tab] anytime for auto-completion.`,
                 setActiveAppModal(app);
               }
             }}
+            onClearTerminal={() => setLines([])}
             apps={apps}
+            soundEnabled={config.soundEnabled}
           />
-        </section>
-
-        {/* High Density Aside HUD */}
-        <HighDensityHud
-          theme={currentTheme}
-          apps={apps}
-          aliases={aliases}
-          notifications={notifications}
-          onOpenApp={(app) => {
-            if (app.launchAction === 'command' && app.commandToRun) {
-              handleExecuteCommand(app.commandToRun);
-            } else {
-              setActiveAppModal(app);
-            }
-          }}
-          onRunCommand={handleExecuteCommand}
-          onOpenBatteryModal={() => setIsBatteryModalOpen(true)}
-          batteryLevel={batteryLevel}
-          isCharging={isCharging}
-          powerSaver={powerSaver}
-          soundEnabled={config.soundEnabled}
-        />
+        )}
       </main>
 
       {/* Footer Command Line and Mobile Touch Toolbar */}
@@ -592,6 +678,7 @@ Press [Tab] anytime for auto-completion.`,
           contacts={contacts}
           recentCalls={recentCalls}
           bluetoothState={bluetoothState}
+          hotspotState={hotspotState}
           history={history}
           onSubmit={handleExecuteCommand}
           onClear={() => setLines([])}
@@ -606,10 +693,10 @@ Press [Tab] anytime for auto-completion.`,
             soundEnabled={config.soundEnabled}
             onKeyPress={handleTouchKeyPress}
             onClear={() => setLines([])}
-            onOpenApps={() => handleExecuteCommand('apps')}
+            onOpenApps={() => setActiveTab('apps')}
             onOpenThemes={() => setIsThemeModalOpen(true)}
             onOpenHelp={() => handleExecuteCommand('help')}
-            onOpenNotifications={() => handleExecuteCommand('notifications')}
+            onOpenNotifications={() => setActiveTab('notifs')}
             onOpenBattery={() => setIsBatteryModalOpen(true)}
           />
         )}

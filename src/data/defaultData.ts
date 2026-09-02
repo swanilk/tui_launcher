@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, VirtualFile, AppNotification } from '../types';
+import { Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, VirtualFile, AppNotification, HotspotState } from '../types';
 
 export const DEFAULT_CONFIG: LauncherConfig = {
   promptUser: 'u0_a284',
@@ -416,3 +416,36 @@ export const DEFAULT_NOTIFICATIONS: AppNotification[] = [
     actionLabel: 'Open Chat',
   },
 ];
+
+export const DEFAULT_HOTSPOT_STATE: HotspotState = {
+  enabled: false,
+  ssid: 'AndroidAP_Terminal',
+  password: 'tether_pass_2026',
+  band: '5.0 GHz',
+  channel: 36,
+  security: 'WPA3-Personal',
+  ipAddress: '192.168.43.1',
+  subnetMask: '255.255.255.0',
+  maxClients: 10,
+  clients: [
+    {
+      id: 'client-1',
+      name: 'MacBook Pro (16-inch)',
+      ip: '192.168.43.14',
+      mac: 'a4:83:e7:22:90:bc',
+      connectedAt: Date.now() - 1000 * 60 * 18,
+      dataUsageMb: 142.6,
+    },
+    {
+      id: 'client-2',
+      name: 'Pixel Tablet',
+      ip: '192.168.43.27',
+      mac: '3c:52:82:aa:bb:11',
+      connectedAt: Date.now() - 1000 * 60 * 6,
+      dataUsageMb: 38.2,
+    },
+  ],
+  dataSharedMb: 180.8,
+  startedAt: undefined,
+};
+

@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification, HotspotState } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 
@@ -31,6 +31,8 @@ export interface CommandContext {
   setRecentCalls: (fn: (prev: RecentCall[]) => RecentCall[]) => void;
   bluetoothState: BluetoothState;
   setBluetoothState: (fn: (prev: BluetoothState) => BluetoothState) => void;
+  hotspotState?: HotspotState;
+  setHotspotState?: (fn: (prev: HotspotState) => HotspotState) => void;
   timers: ActiveTimer[];
   setTimers: (fn: (prev: ActiveTimer[]) => ActiveTimer[]) => void;
   history: string[];
@@ -43,6 +45,8 @@ export interface CommandContext {
   openBatteryModal?: () => void;
   togglePowerSaver?: () => void;
   setMatrixActive: (active: boolean) => void;
+  activeTab?: 'apps' | 'notifs' | 'term';
+  setActiveTab?: (tab: 'apps' | 'notifs' | 'term') => void;
   batteryLevel: number;
   isCharging: boolean;
   batteryData?: BatteryTelemetry;
@@ -198,6 +202,49 @@ export class CommandParser {
     const args = tokens.slice(1);
 
     switch (command) {
+      // 0. TAB SWITCHER
+      case 'tab':
+      case 'tabs': {
+        const target = args[0]?.toLowerCase();
+        if (!target) {
+          return {
+            type: 'output',
+            content: `📑 SYSTEM TABS (Apps | Notifs | Term):
+  • tab apps     - Switch to Installed Applications Tab
+  • tab notifs   - Switch to Notifications Hub Tab
+  • tab term     - Switch to Terminal Output Tab
+
+Current Active Tab: [ ${ctx.activeTab?.toUpperCase() || 'TERM'} ]
+Tip: You can press Ctrl+1 (Apps), Ctrl+2 (Notifs), Ctrl+3 (Term) or click the tab pills at the top.`,
+          };
+        }
+
+        if (target === 'apps' || target === 'app' || target === '1') {
+          ctx.setActiveTab?.('apps');
+          return { type: 'success', content: '[✓] Switched to Apps Tab.' };
+        }
+        if (target === 'notifs' || target === 'notif' || target === 'notifications' || target === '2') {
+          ctx.setActiveTab?.('notifs');
+          return { type: 'success', content: '[✓] Switched to Notifs Tab.' };
+        }
+        if (target === 'term' || target === 'terminal' || target === 'output' || target === '3') {
+          ctx.setActiveTab?.('term');
+          return { type: 'success', content: '[✓] Switched to Term Tab.' };
+        }
+
+        return { type: 'error', content: `tab: Unknown tab '${target}'. Options: apps, notifs, term` };
+      }
+
+      case 'term':
+      case 'terminal':
+      case 'console': {
+        ctx.setActiveTab?.('term');
+        return {
+          type: 'output',
+          content: `💻 Terminal Output Session (tty1 • pts/0 • active):\n  Total command history: ${ctx.history.length} logged\n  Ready for commands. Output appears in this tab.`,
+        };
+      }
+
       // 1. HELP & MANUAL
       case 'help':
       case '?':
@@ -563,6 +610,13 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
           type: 'output',
           content: `📶 Wi-Fi Status:\n  SSID:      ${ctx.wifiSsid}\n  Signal:    -48 dBm (Excellent, 98%)\n  Speed:     866 Mbps (Wi-Fi 6 802.11ax)\n  IP Addr:   192.168.1.142\n  Gateway:   192.168.1.1\n  DNS:       8.8.8.8, 1.1.1.1\n  Security:  WPA3-Personal`,
         };
+      }
+
+      case 'hotspot':
+      case 'tether':
+      case 'tethering':
+      case 'ap': {
+        return this.handleHotspot(args, ctx);
       }
 
       case 'bluetooth':
@@ -1048,6 +1102,8 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
         battery: 'battery [status | monitor | graph | top | saver | health | calibrate]\nHardware battery telemetry monitor. Type "battery monitor" to open interactive GUI, "battery graph" for 24h discharge curve, or "battery saver" to toggle low power mode.',
         bluetooth: 'bluetooth [on | off | toggle | connect <device> | disconnect [device] | scan | pair <device> | unpair <device>]\nBluetooth 5.4 LE Audio & Peripheral Controller. Type "bluetooth on" to power on, "bluetooth off" to power down, or "bluetooth connect <device>" with interactive autocompletion.',
         bt: 'bt [on | off | toggle | connect <device> | disconnect | scan | pair]\nShort alias for bluetooth controller suite. Type "bt connect " in the prompt to view paired & nearby devices.',
+        hotspot: 'hotspot [on | off | toggle | status | config <ssid> <pass> [band] | clients | pass]\nWi-Fi Mobile Hotspot & USB/Wireless Tethering Controller. Type "hotspot on" to turn on hotspot, "hotspot off" to turn off, "hotspot toggle" to switch state, or "hotspot status" to inspect tethered clients and data usage.',
+        tether: 'tether [on | off | toggle | status]\nAlias for hotspot mobile tethering controller.',
       };
 
       if (docs[topic]) {
@@ -1093,7 +1149,8 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
   calc <expression>     Terminal arithmetic calculator
   weather [city]        ASCII weather conditions & forecast
   neofetch / sysinfo    Device hardware specs, RAM, and Android info
-  wifi / battery        Network & power telemetry
+  wifi / hotspot / bt   Network, mobile hotspot & bluetooth controller
+  battery [monitor]     Hardware battery telemetry & power saver
   notes / todo          Manage local personal notes and tasks
   timer <sec>           Countdown timer with audio bell
   history [-c]          View or clear persistent command history
@@ -1950,6 +2007,265 @@ ${batInfo}${codecInfo}  Signal Strength: ${targetDevice.rssi} dBm (Latency ~24ms
     return {
       type: 'error',
       content: `bluetooth: unknown subcommand '${sub}'. Type 'bluetooth' or 'help bluetooth' for valid commands.`,
+    };
+  }
+
+  private static handleHotspot(args: string[], ctx: CommandContext): CommandResult {
+    const sub = args[0]?.toLowerCase();
+    const hs = ctx.hotspotState || {
+      enabled: false,
+      ssid: 'AndroidAP_Terminal',
+      password: 'tether_pass_2026',
+      band: '5.0 GHz' as const,
+      channel: 36,
+      security: 'WPA3-Personal' as const,
+      ipAddress: '192.168.43.1',
+      subnetMask: '255.255.255.0',
+      maxClients: 10,
+      clients: [
+        {
+          id: 'client-1',
+          name: 'MacBook Pro (16-inch)',
+          ip: '192.168.43.14',
+          mac: 'a4:83:e7:22:90:bc',
+          connectedAt: Date.now() - 1000 * 60 * 18,
+          dataUsageMb: 142.6,
+        },
+        {
+          id: 'client-2',
+          name: 'Pixel Tablet',
+          ip: '192.168.43.27',
+          mac: '3c:52:82:aa:bb:11',
+          connectedAt: Date.now() - 1000 * 60 * 6,
+          dataUsageMb: 38.2,
+        },
+      ],
+      dataSharedMb: 180.8,
+      startedAt: undefined,
+    };
+
+    // 1. HOTSPOT ON / ENABLE / START
+    if (sub === 'on' || sub === 'enable' || sub === 'start' || sub === '1') {
+      if (hs.enabled) {
+        return {
+          type: 'output',
+          content: `🔥 Wi-Fi Mobile Hotspot is already ACTIVE & BROADCASTING.
+  SSID:      ${hs.ssid}
+  Password:  ${hs.password}
+  Clients:   ${hs.clients.length} connected (${hs.clients.map((c) => c.name).join(', ')})
+  Gateway:   ${hs.ipAddress}`,
+        };
+      }
+
+      ctx.setHotspotState?.((prev) => ({
+        ...prev,
+        enabled: true,
+        startedAt: Date.now(),
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick('modern', 0.35);
+      }
+
+      const clientList = hs.clients.map((c, i) => `  ${i + 1}. [DHCP] ${c.name} (${c.ip}) • MAC: ${c.mac}`).join('\n');
+
+      return {
+        type: 'success',
+        content: `[✓] Wi-Fi Mobile Hotspot & Wireless Tethering ENABLED.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  AP Interface:    ap0 / wlan1 (Hardware Master AP Mode)
+  Network Name:    ${hs.ssid}
+  Security:        ${hs.security} (WPA3-SAE Hardware Offload)
+  WPA Key:         ${hs.password}
+  Frequency:       ${hs.band} (Channel ${hs.channel}, 80 MHz DFS)
+  Gateway IP:      ${hs.ipAddress} (${hs.subnetMask})
+  DHCP Range:      192.168.43.10 - 192.168.43.250
+  Max Bandwidth:   Up to 1200 Mbps (Wi-Fi 6 AX SoftAP)
+  Status:          [● BROADCASTING ACTIVE]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Connected Tethered Devices (${hs.clients.length}/${hs.maxClients}):
+${clientList}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Tip: Type 'hotspot off' to disable or 'hotspot clients' to inspect traffic.`,
+      };
+    }
+
+    // 2. HOTSPOT OFF / DISABLE / STOP
+    if (sub === 'off' || sub === 'disable' || sub === 'stop' || sub === '0') {
+      if (!hs.enabled) {
+        return {
+          type: 'output',
+          content: '🔥 Wi-Fi Mobile Hotspot is already powered OFF.',
+        };
+      }
+
+      ctx.setHotspotState?.((prev) => ({
+        ...prev,
+        enabled: false,
+        startedAt: undefined,
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick('mechanical', 0.2);
+      }
+
+      return {
+        type: 'success',
+        content: `[✓] Wi-Fi Mobile Hotspot & Wireless Tethering DISABLED.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  AP Interface:    ap0 / wlan1 [STANDBY / POWER SAVING]
+  Terminated:      ${hs.clients.length} active client DHCP leases closed
+  Total Shared:    ${hs.dataSharedMb.toFixed(1)} MB transmitted in this session
+  Status:          [○ INACTIVE / OFF]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Wi-Fi hardware radio returned to client-only low-power operation.`,
+      };
+    }
+
+    // 3. TOGGLE
+    if (sub === 'toggle' || sub === 't') {
+      const nextState = !hs.enabled;
+      ctx.setHotspotState?.((prev) => ({
+        ...prev,
+        enabled: nextState,
+        startedAt: nextState ? Date.now() : undefined,
+      }));
+
+      if (ctx.config.soundEnabled) {
+        soundManager.playKeyClick(nextState ? 'modern' : 'mechanical', 0.3);
+      }
+
+      return {
+        type: 'success',
+        content: nextState
+          ? `[✓] Hotspot toggled: ACTIVE [ON]\n  SSID: "${hs.ssid}" | Key: "${hs.password}" | Band: ${hs.band}`
+          : `[✓] Hotspot toggled: INACTIVE [OFF]\n  Broadcasting stopped. Radio returned to idle.`,
+      };
+    }
+
+    // 4. CONFIG / SET <ssid> [password] [band]
+    if (sub === 'config' || sub === 'set' || sub === 'rename') {
+      const newSsid = args[1];
+      const newPass = args[2];
+      const newBand = args[3]?.toLowerCase();
+
+      if (!newSsid) {
+        return {
+          type: 'output',
+          content: `⚙️ HOTSPOT CONFIGURATION:
+Usage: hotspot config <ssid> [password] [2.4ghz | 5ghz | 6ghz]
+Examples:
+  • hotspot config Pixel_AP
+  • hotspot config Pixel_AP mySecretPass123
+  • hotspot config Pixel_AP mySecretPass123 5ghz
+Current Settings:
+  SSID:     ${hs.ssid}
+  Password: ${hs.password}
+  Band:     ${hs.band}`,
+        };
+      }
+
+      let targetBand: '2.4 GHz' | '5.0 GHz' | '6.0 GHz' = hs.band;
+      if (newBand) {
+        if (newBand.includes('2.4') || newBand === '2') targetBand = '2.4 GHz';
+        else if (newBand.includes('6')) targetBand = '6.0 GHz';
+        else targetBand = '5.0 GHz';
+      }
+
+      ctx.setHotspotState?.((prev) => ({
+        ...prev,
+        ssid: newSsid,
+        password: newPass || prev.password,
+        band: targetBand,
+      }));
+
+      return {
+        type: 'success',
+        content: `[✓] Hotspot configuration updated:
+  SSID:     ${newSsid}
+  Password: ${newPass || hs.password}
+  Band:     ${targetBand}
+  State:    ${hs.enabled ? 'Live (reloaded SoftAP interface)' : 'Configured (ready to launch with "hotspot on")'}`,
+      };
+    }
+
+    // 5. CLIENTS / LIST / LEASES
+    if (sub === 'clients' || sub === 'list' || sub === 'devices' || sub === 'leases' || sub === 'dhcp') {
+      if (!hs.enabled) {
+        return {
+          type: 'output',
+          content: `🔥 Hotspot is currently OFF. Type 'hotspot on' to start broadcasting and connect devices.`,
+        };
+      }
+
+      if (hs.clients.length === 0) {
+        return {
+          type: 'output',
+          content: `🔥 Hotspot is ON (${hs.ssid}), but no clients are currently connected.`,
+        };
+      }
+
+      const rows = hs.clients.map((c, idx) => {
+        const timeStr = formatRelativeTime(c.connectedAt);
+        return `  ${idx + 1}. ${c.name.padEnd(24, ' ')} ${c.ip.padEnd(16, ' ')} ${c.mac.padEnd(18, ' ')} ${c.dataUsageMb.toFixed(1)} MB (${timeStr})`;
+      }).join('\n');
+
+      return {
+        type: 'output',
+        content: `📡 CONNECTED HOTSPOT CLIENTS (${hs.clients.length}/${hs.maxClients}):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  #   DEVICE NAME              IP ADDRESS       MAC ADDRESS        DATA USED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${rows}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Total Shared Data: ${hs.dataSharedMb.toFixed(1)} MB • Gateway: ${hs.ipAddress}`,
+      };
+    }
+
+    // 6. PASSWORD
+    if (sub === 'pass' || sub === 'password' || sub === 'key') {
+      const newPass = args[1];
+      if (newPass) {
+        if (newPass.length < 8) {
+          return { type: 'error', content: 'hotspot: WPA key must be at least 8 characters long.' };
+        }
+        ctx.setHotspotState?.((prev) => ({ ...prev, password: newPass }));
+        return { type: 'success', content: `[✓] Hotspot WPA password updated to: "${newPass}"` };
+      }
+      return {
+        type: 'output',
+        content: `🔑 Hotspot Wi-Fi Password: "${hs.password}"\nTo change: type 'hotspot pass <new_password>'`,
+      };
+    }
+
+    // 7. DEFAULT / STATUS / INFO
+    const uptimeStr = hs.startedAt ? formatRelativeTime(hs.startedAt) : 'Inactive';
+    const statusBadge = hs.enabled
+      ? `[● ACTIVE / BROADCASTING]`
+      : `[○ INACTIVE / DISABLED]`;
+
+    return {
+      type: 'output',
+      content: `🔥 ANDROID 16 MOBILE HOTSPOT & TETHERING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  State:           ${statusBadge}
+  SSID (Name):     ${hs.ssid}
+  Security:        ${hs.security}
+  WPA Key:         ${hs.password}
+  Frequency:       ${hs.band} (Channel ${hs.channel})
+  Interface:       ap0 / wlan1 (Master SoftAP)
+  Gateway IP:      ${hs.ipAddress} (${hs.subnetMask})
+  Active Clients:  ${hs.enabled ? `${hs.clients.length} / ${hs.maxClients} connected` : '0 (Hotspot Disabled)'}
+  Data Transferred:${hs.dataSharedMb.toFixed(1)} MB total
+  Session Uptime:  ${uptimeStr}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Quick Commands:
+  • hotspot on / enable / start    - Turn hotspot ON & start broadcasting
+  • hotspot off / disable / stop   - Turn hotspot OFF & terminate leases
+  • hotspot toggle                 - Switch hotspot state on or off
+  • hotspot config <ssid> [pass]   - Configure SSID and password
+  • hotspot clients                - List connected tethered client devices
+  • hotspot pass [new_pass]        - View or update Wi-Fi security key`,
     };
   }
 
