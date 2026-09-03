@@ -45,15 +45,7 @@ jobs:
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if [ -f "$MANIFEST" ]; then
             echo "Verifying AndroidManifest.xml syntax..."
-            python3 -c "
-            import xml.etree.ElementTree as ET
-            try:
-                tree = ET.parse('$MANIFEST')
-                print('AndroidManifest.xml is valid XML! Root:', tree.getroot().tag)
-            except Exception as e:
-                print('Error parsing AndroidManifest.xml:', e)
-                exit(1)
-            "
+            python3 -c "import xml.etree.ElementTree as ET; ET.parse('$MANIFEST'); print('AndroidManifest.xml is valid XML')"
           fi
 
       - name: Patch Kotlin stdlib resolution
