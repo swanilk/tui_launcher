@@ -15,6 +15,7 @@ import {
   TodoItem, 
   ContactItem, 
   RecentCall,
+  ActiveCall,
   ActiveTimer,
   BatteryTelemetry,
   AppNotification,
@@ -49,6 +50,7 @@ import { BatteryMonitorModal } from './components/BatteryMonitorModal';
 import { CelestialClockModal, CelestialDateTimeSection } from './components/CelestialClock';
 import { DefaultLauncherModal } from './components/DefaultLauncherModal';
 import { MatrixScreen } from './components/MatrixScreen';
+import { ActiveCallOverlay } from './components/ActiveCallOverlay';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { soundManager } from './utils/audio';
 import { getNativeInstalledApps, launchNativeAndroidApp, isNativeAndroidApp } from './utils/nativeLauncher';
@@ -302,6 +304,9 @@ export default function App() {
       localStorage.setItem('android_tui_hotspot', JSON.stringify(hotspotState));
     } catch {}
   }, [hotspotState]);
+
+  // 8e. Active Telephony VoLTE / Phone Call
+  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
 
   // 9. Active Timers
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
@@ -571,6 +576,8 @@ Press [Tab] anytime for auto-completion.`,
         setContacts,
         recentCalls,
         setRecentCalls,
+        activeCall,
+        setActiveCall,
         bluetoothState,
         setBluetoothState,
         hotspotState,
@@ -911,6 +918,21 @@ Press [Tab] anytime for auto-completion.`,
 
       {/* Matrix Digital Rain Screensaver */}
       {isMatrixActive && <MatrixScreen onExit={() => setIsMatrixActive(false)} />}
+
+      {/* Active VoLTE / Phone Telephony In-Call Overlay */}
+      {activeCall && (
+        <ActiveCallOverlay
+          activeCall={activeCall}
+          theme={currentTheme}
+          soundEnabled={config.soundEnabled}
+          soundVolume={config.soundVolume}
+          onEndCall={() => setActiveCall(null)}
+          onUpdateCall={(update) => setActiveCall((prev) => (prev ? { ...prev, ...update } : null))}
+          onAddRecentCall={(newRecent) =>
+            setRecentCalls((prev) => [newRecent, ...prev.filter((r) => r.phone !== newRecent.phone)].slice(0, 30))
+          }
+        />
+      )}
     </div>
   );
 }

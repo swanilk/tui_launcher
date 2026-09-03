@@ -189,6 +189,121 @@ class SoundSynthesizer {
       });
     } catch {}
   }
+
+  playDtmfKey(key: string, volume = 0.25) {
+    if (volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const dtmfMap: Record<string, [number, number]> = {
+        '1': [697, 1209],
+        '2': [697, 1336],
+        '3': [697, 1477],
+        '4': [770, 1209],
+        '5': [770, 1336],
+        '6': [770, 1477],
+        '7': [852, 1209],
+        '8': [852, 1336],
+        '9': [852, 1477],
+        '*': [941, 1209],
+        '0': [941, 1336],
+        '#': [941, 1477],
+      };
+
+      const freqs = dtmfMap[key] || [770, 1336];
+      const now = this.ctx.currentTime;
+      freqs.forEach((freq) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(volume * 0.3, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.2);
+      });
+    } catch {}
+  }
+
+  playRingback(volume = 0.2) {
+    if (volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      // Standard US Ringback dual frequency: 440 Hz + 480 Hz
+      const freqs = [440, 480];
+      freqs.forEach((freq) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(volume * 0.25, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.85);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + 0.9);
+      });
+    } catch {}
+  }
+
+  playCallConnected(volume = 0.25) {
+    if (volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      const notes = [440, 554.37, 659.25]; // A4, C#5, E5
+      notes.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.08);
+        gain.gain.setValueAtTime(volume * 0.3, now + idx * 0.08);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.08 + 0.2);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + idx * 0.08);
+        osc.stop(now + idx * 0.08 + 0.22);
+      });
+    } catch {}
+  }
+
+  playCallEnded(volume = 0.25) {
+    if (volume <= 0) return;
+    try {
+      this.initContext();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      // Off-hook / busy disconnect tone (480 Hz + 620 Hz pulsing)
+      for (let b = 0; b < 2; b++) {
+        const offset = b * 0.22;
+        [480, 620].forEach((freq) => {
+          if (!this.ctx) return;
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(freq, now + offset);
+          gain.gain.setValueAtTime(volume * 0.3, now + offset);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.16);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(now + offset);
+          osc.stop(now + offset + 0.18);
+        });
+      }
+    } catch {}
+  }
 }
 
 export const soundManager = new SoundSynthesizer();

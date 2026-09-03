@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification, HotspotState } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, ActiveCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification, HotspotState } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 import {
@@ -15,6 +15,7 @@ import {
   connectNativeBluetooth,
   openNativeBluetoothSettings,
   openNativeHotspotSettings,
+  dialNativePhoneNumber,
   isNativeAndroidApp,
 } from './nativeLauncher';
 
@@ -40,6 +41,8 @@ export interface CommandContext {
   setContacts: (fn: (prev: ContactItem[]) => ContactItem[]) => void;
   recentCalls: RecentCall[];
   setRecentCalls: (fn: (prev: RecentCall[]) => RecentCall[]) => void;
+  activeCall?: ActiveCall | null;
+  setActiveCall?: (call: ActiveCall | null | ((prev: ActiveCall | null) => ActiveCall | null)) => void;
   bluetoothState: BluetoothState;
   setBluetoothState: (fn: (prev: BluetoothState) => BluetoothState) => void;
   hotspotState?: HotspotState;
@@ -476,7 +479,25 @@ App '${found.name}' uninstall dispatched to Android OS. Confirm prompt if shown.
       // 3. PHONE CALL & SMS
       case 'call':
       case 'dial': {
-        if (args.length === 0) {
+        const rawQuery = args.join(' ').replace(/^["']|["']$/g, '').trim();
+
+        // If no arguments provided
+        if (!rawQuery) {
+          if (command === 'dial') {
+            // Directly trigger native Android Phone Dialer application
+            const dialRes = await dialNativePhoneNumber();
+            return {
+              type: 'success',
+              content: `📞 ANDROID PHONE DIALER DISPATCHED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Action:  ${dialRes.message}
+  Method:  ${dialRes.method}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Direct telephone keypad opened. Type 'call <number|name>' to place a direct call.`,
+              metadata: { action: 'call_dialer_open' },
+            };
+          }
+
           const recentCalls = ctx.recentCalls || [];
           const recentList = recentCalls.slice(0, 5).map((rc) => {
             const timeAgo = formatRelativeTime(rc.timestamp);
@@ -484,22 +505,28 @@ App '${found.name}' uninstall dispatched to Android OS. Confirm prompt if shown.
             return `  • call "${rc.name}" (${rc.phone}) — ${typeIcon} • ${timeAgo}`;
           }).join('\n');
 
+          const topContacts = (ctx.contacts || []).slice(0, 4).map((c) => `  • call "${c.name}" (${c.phone})`).join('\n');
+
           return {
             type: 'output',
             content: `📞 ANDROID PHONE CALL DIALER:
-Usage: call <phone_number | contact_name>
-Examples:
-  • call +1-800-555-0199
-  • call <contact_name>
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Usage:
+  • call <phone_number | contact_name>  - Initiate phone call
+  • dial                                 - Open native Android phone dialer
+  • hangup                               - End active ongoing call
+  • recents / calls                      - View call history
 
-🕒 RECENT CALLS (Type 'call <name|num>' or select suggestion):
+🕒 RECENT CALLS:
 ${recentList || '  (No call history yet. Dial any number to place calls)'}
 
+👥 QUICK CONTACTS:
+${topContacts || '  (No contacts saved. Use \'contact add <name> <phone>\')'}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Tip: Type 'call ' in prompt to view interactive autocomplete from your contacts and call logs!`,
           };
         }
 
-        const rawQuery = args.join(' ').replace(/^["']|["']$/g, '').trim();
         const cleanQueryNum = rawQuery.replace(/[^\d+]/g, '');
 
         // Match contact by name or clean phone substring
@@ -515,9 +542,13 @@ Tip: Type 'call ' in prompt to view interactive autocomplete from your contacts 
           return nameMatch || phoneMatch;
         });
 
-        const targetName = matchedContact ? matchedContact.name : (rawQuery.match(/\d/) ? rawQuery : rawQuery);
+        const targetName = matchedContact ? matchedContact.name : rawQuery;
         const targetPhone = matchedContact ? matchedContact.phone : rawQuery;
         const cleanPhone = targetPhone.replace(/[^\d+*#]/g, '');
+
+        if (!cleanPhone && !targetPhone) {
+          return { type: 'error', content: 'call: Please specify a valid phone number or contact name.' };
+        }
 
         // Log to Recent Calls (newest at top)
         const newLogEntry: RecentCall = {
@@ -526,29 +557,26 @@ Tip: Type 'call ' in prompt to view interactive autocomplete from your contacts 
           phone: targetPhone,
           timestamp: Date.now(),
           type: 'outgoing',
-          duration: 'Connected',
+          duration: 'Calling...',
         };
         ctx.setRecentCalls((prev) => [newLogEntry, ...prev.filter((r) => r.phone !== targetPhone)].slice(0, 30));
+
+        // Start active in-call overlay & telephony session
+        ctx.setActiveCall?.({
+          id: `call-${Date.now()}`,
+          name: targetName,
+          phone: targetPhone,
+          status: 'dialing',
+          startedAt: Date.now(),
+        });
 
         // Play dialer DTMF tone
         if (ctx.config.soundEnabled) {
           soundManager.playDialTone(ctx.config.soundVolume);
         }
 
-        // Trigger native call intent (tel: scheme)
-        if (typeof window !== 'undefined' && cleanPhone) {
-          try {
-            const telUri = `tel:${cleanPhone}`;
-            const link = document.createElement('a');
-            link.href = telUri;
-            link.setAttribute('target', '_top');
-            document.body.appendChild(link);
-            link.click();
-            setTimeout(() => {
-              if (document.body.contains(link)) document.body.removeChild(link);
-            }, 500);
-          } catch {}
-        }
+        // Trigger native Android Phone Dialer Intent / Capacitor Plugin
+        const dialRes = await dialNativePhoneNumber(cleanPhone);
 
         return {
           type: 'success',
@@ -556,18 +584,37 @@ Tip: Type 'call ' in prompt to view interactive autocomplete from your contacts 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   Target:       ${targetName}
   Phone Number: ${targetPhone}
-  Protocol URI: tel:${cleanPhone}
-  Telephony:    Android VoLTE / 5G Radio Interface Layer
-  Status:       [✓] Dispatched to Device Phone Dialer
+  Telephony:    Android VoLTE / Radio Interface Layer
+  Status:       [● DIALING / ACTIVE]
+  Dispatch:     ${dialRes.message} (${dialRes.method})
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Connecting call... If dialer did not open automatically, tap below.`,
+In-call controller active. Type 'hangup' to end call or tap controls below.`,
           metadata: {
             action: 'call',
             name: targetName,
             phone: targetPhone,
             cleanPhone,
             timestamp: Date.now(),
+            method: dialRes.method,
           },
+        };
+      }
+
+      case 'hangup':
+      case 'endcall':
+      case 'disconnect': {
+        if (!ctx.activeCall) {
+          return { type: 'output', content: '📞 No call is currently active to hang up.' };
+        }
+        const call = ctx.activeCall;
+        const dur = call.connectedAt ? `${Math.floor((Date.now() - call.connectedAt) / 1000)}s` : 'Cancelled';
+        ctx.setActiveCall?.(null);
+        if (ctx.config.soundEnabled) {
+          soundManager.playCallEnded(ctx.config.soundVolume);
+        }
+        return {
+          type: 'success',
+          content: `[✓] Call ended with ${call.name} (${call.phone}). Duration: ${dur}`,
         };
       }
 
@@ -1302,6 +1349,10 @@ Commands:
         bt: 'bt [on | off | toggle | connect <device> | disconnect | scan | pair]\nShort alias for bluetooth controller suite. Type "bt connect " in the prompt to view paired & nearby devices.',
         hotspot: 'hotspot [on | off | toggle | status | config <ssid> <pass> [band] | clients | pass]\nWi-Fi Mobile Hotspot & USB/Wireless Tethering Controller. Type "hotspot on" to turn on hotspot, "hotspot off" to turn off, "hotspot toggle" to switch state, or "hotspot status" to inspect tethered clients and data usage.',
         tether: 'tether [on | off | toggle | status]\nAlias for hotspot mobile tethering controller.',
+        call: 'call <number | contact_name>\nPlace an outgoing phone call via Android telephony / VoLTE. Opens active in-call overlay controller with DTMF dialpad, mute, and speaker, or dispatches directly to your phone dialer app.',
+        dial: 'dial [number]\nOpen native Android phone dialer screen or initiate call with specified number.',
+        hangup: 'hangup / endcall\nTerminate currently active outgoing or incoming phone call.',
+        recents: 'recents / calls\nView call logs history with timestamps and status (missed, incoming, outgoing).',
         launcher: 'set-default-launcher / launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app / home screen, install PWA, or configure ADB native home intent.',
         'set-default': 'set-default-launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app.',
       };

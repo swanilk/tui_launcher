@@ -15,6 +15,7 @@ import {
   Phone, 
   PhoneCall, 
   PhoneOutgoing, 
+  PhoneOff,
   MessageSquare, 
   RotateCw, 
   Trash2, 
@@ -25,6 +26,7 @@ import {
   ChevronRight,
   Zap
 } from 'lucide-react';
+import { dialNativePhoneNumber } from '../utils/nativeLauncher';
 
 interface OutputViewProps {
   lines: TerminalLine[];
@@ -126,10 +128,10 @@ export const OutputView: React.FC<OutputViewProps> = ({
 
               {/* Interactive Telephony Action Buttons */}
               <div className="flex flex-wrap gap-2 pt-1 border-t" style={{ borderColor: `${theme.successColor}20` }}>
-                <a
-                  id={`dial-link-${line.id}`}
-                  href={`tel:${dialNumber}`}
-                  target="_top"
+                <button
+                  type="button"
+                  id={`dial-btn-${line.id}`}
+                  onClick={() => dialNativePhoneNumber(dialNumber)}
                   className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 border transition-transform hover:scale-105 active:scale-95 shadow-sm"
                   style={{
                     backgroundColor: theme.successColor,
@@ -139,7 +141,16 @@ export const OutputView: React.FC<OutputViewProps> = ({
                 >
                   <PhoneCall size={13} />
                   <span>Open Phone Dialer ({dialNumber})</span>
-                </a>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand('hangup')}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border border-red-500/60 bg-red-950/30 text-red-400 hover:bg-red-900/40 transition-colors"
+                >
+                  <PhoneOff size={12} />
+                  <span>End Call</span>
+                </button>
 
                 <button
                   type="button"

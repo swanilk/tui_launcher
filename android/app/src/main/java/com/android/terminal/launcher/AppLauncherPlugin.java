@@ -116,11 +116,54 @@ public class AppLauncherPlugin extends Plugin {
                 ret.put("success", true);
                 ret.put("packageName", packageName);
                 call.resolve(ret);
+            } else if (packageName.contains("dialer") || packageName.contains("phone") || packageName.equals("com.android.dialer")) {
+                // Fallback to Android system dialer intent if specific OEM package wasn't found
+                Intent dialIntent = new Intent(Intent.ACTION_DIAL);
+                dialIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(dialIntent);
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("packageName", packageName);
+                ret.put("action", "ACTION_DIAL");
+                call.resolve(ret);
             } else {
                 call.reject("Could not find launchable intent for: " + packageName);
             }
         } catch (Exception e) {
             call.reject("Error launching application " + packageName + ": " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void dialPhoneNumber(PluginCall call) {
+        String phoneNumber = call.getString("phoneNumber");
+        try {
+            Intent intent = new Intent(Intent.ACTION_DIAL);
+            if (phoneNumber != null && !phoneNumber.trim().isEmpty()) {
+                intent.setData(Uri.parse("tel:" + Uri.encode(phoneNumber.trim())));
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("phoneNumber", phoneNumber != null ? phoneNumber : "");
+            call.resolve(ret);
+        } catch (Exception e) {
+            try {
+                // Fallback to opening dialer without prefilled number
+                Intent fallbackIntent = new Intent(Intent.ACTION_DIAL);
+                fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(fallbackIntent);
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("fallback", true);
+                call.resolve(ret);
+            } catch (Exception ex) {
+                call.reject("Could not open phone dialer: " + ex.getMessage());
+            }
         }
     }
 
