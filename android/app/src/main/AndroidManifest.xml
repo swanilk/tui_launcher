@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:tools="http://schemas.android.com/tools"
-    package="com.android.terminal.launcher">
+    xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Permissions for Launcher, Storage, Telephony, Bluetooth and Device Access -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -50,7 +49,7 @@
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation|density"
-            android:name=".MainActivity"
+            android:name="com.android.terminal.launcher.MainActivity"
             android:label="@string/title_activity_main"
             android:theme="@style/AppTheme.NoActionBarLaunch"
             android:launchMode="singleTask"
