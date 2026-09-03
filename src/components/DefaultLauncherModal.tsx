@@ -25,9 +25,13 @@ import {
   Radio,
   Zap,
   HelpCircle,
-  Share2
+  Share2,
+  GitBranch,
+  Box,
+  Cpu
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
+import { openAndroidHomeSettings, isNativeAndroidApp } from '../utils/nativeLauncher';
 
 interface DefaultLauncherModalProps {
   isOpen: boolean;
@@ -47,7 +51,7 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
   soundEnabled,
 }) => {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
-  const [activeTab, setActiveTab] = useState<'pwa' | 'android' | 'desktop' | 'kiosk'>('pwa');
+  const [activeTab, setActiveTab] = useState<'github' | 'phone_settings' | 'adb' | 'pwa' | 'desktop' | 'kiosk'>('github');
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [wakeLockActive, setWakeLockActive] = useState(false);
@@ -110,14 +114,9 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
     }
   };
 
-  const handleOpenAndroidHomeSettings = () => {
+  const handleOpenAndroidHomeSettings = async () => {
     playClick();
-    // Attempt standard Android home settings intent URI
-    try {
-      window.location.href = 'intent:#Intent;action=android.settings.HOME_SETTINGS;end';
-    } catch {
-      window.location.href = 'intent:#Intent;action=android.settings.MANAGE_DEFAULT_APPS_SETTINGS;end';
-    }
+    await openAndroidHomeSettings();
   };
 
   const manifestSnippet = `<activity
@@ -132,7 +131,7 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
     </intent-filter>
 </activity>`;
 
-  const adbCommand = `adb shell cmd package set-home-activity com.android.tui.launcher/.MainActivity`;
+  const adbCommand = `adb shell cmd package set-home-activity com.android.terminal.launcher/.MainActivity`;
 
   return (
     <div
@@ -262,10 +261,11 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
           style={{ borderColor: theme.borderColor, backgroundColor: `${theme.cardBg}` }}
         >
           {[
-            { id: 'pwa', label: '1. Android / PWA Setup', icon: <Smartphone size={13} /> },
-            { id: 'android', label: '2. Native / ADB Command', icon: <Terminal size={13} /> },
-            { id: 'desktop', label: '3. Desktop / iOS', icon: <Monitor size={13} /> },
-            { id: 'kiosk', label: '4. Launcher Options', icon: <Settings size={13} /> },
+            { id: 'github', label: '1. Compile APK on GitHub', icon: <GitBranch size={13} /> },
+            { id: 'phone_settings', label: '2. Set as Default on Phone', icon: <Smartphone size={13} /> },
+            { id: 'adb', label: '3. ADB & Manifest', icon: <Terminal size={13} /> },
+            { id: 'pwa', label: '4. Web / PWA Info', icon: <Monitor size={13} /> },
+            { id: 'kiosk', label: '5. Launcher Options', icon: <Settings size={13} /> },
           ].map((tab) => {
             const isActive = activeTab === tab.id;
             return (
@@ -292,8 +292,237 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
 
         {/* Tab Content Body */}
         <div className="flex-1 overflow-y-auto p-4 space-y-4 text-xs">
-          {/* TAB 1: PWA & Android Step-by-Step */}
-          {activeTab === 'pwa' && (
+          {/* TAB 1: GITHUB APK COMPILATION (DIRECT ANSWER TO USER) */}
+          {activeTab === 'github' && (
+            <div className="space-y-4">
+              {/* Critical Clarification Banner */}
+              <div
+                className="p-3.5 rounded-xl border space-y-2"
+                style={{
+                  borderColor: `${theme.accentColor}80`,
+                  backgroundColor: `${theme.accentColor}15`,
+                }}
+              >
+                <div className="flex items-center gap-2 font-bold text-sm" style={{ color: theme.accentColor }}>
+                  <Cpu size={16} />
+                  <span>HOW TO GET REAL PHONE APPS & SET AS DEFAULT LAUNCHER</span>
+                </div>
+                <p className="text-[11px] leading-relaxed opacity-90">
+                  Android OS <strong>strictly blocks</strong> websites and browser PWAs from being selected as the phone's default Home App and forbids web pages from reading your private installed apps. 
+                  To show <strong>all apps installed on your phone</strong> and set it as your <strong>real default launcher</strong>, you must install the native <strong>.apk</strong>!
+                </p>
+              </div>
+
+              {/* GitHub Actions Build Guide */}
+              <div
+                className="p-4 rounded-xl border space-y-3"
+                style={{ borderColor: theme.borderColor, backgroundColor: theme.bg }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-bold text-sm" style={{ color: theme.promptColor }}>
+                    <GitBranch size={16} />
+                    <span>CAN YOU COMPILE ON GITHUB? YES!</span>
+                  </div>
+                  <span
+                    className="px-2 py-0.5 rounded text-[10px] font-mono border"
+                    style={{ borderColor: `${theme.successColor}50`, color: theme.successColor, backgroundColor: `${theme.successColor}15` }}
+                  >
+                    READY TO BUILD
+                  </span>
+                </div>
+
+                <p className="text-[11px] opacity-80">
+                  We have included an automated GitHub Actions workflow (<code className="px-1 py-0.5 rounded bg-black/40 text-emerald-400">.github/workflows/build-apk.yml</code>) and native Android source code (<code className="px-1 py-0.5 rounded bg-black/40 text-emerald-400">AppLauncherPlugin.java</code>).
+                </p>
+
+                <div className="space-y-2.5 pt-1">
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      1
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">Push / Export this repository to GitHub</div>
+                      <p className="text-[11px] opacity-75 mt-0.5">
+                        In AI Studio or your git client, push all files including the <code className="font-mono">android/</code> directory and <code className="font-mono">.github/</code> folder to your GitHub repo.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      2
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">Go to the "Actions" tab on GitHub</div>
+                      <p className="text-[11px] opacity-75 mt-0.5">
+                        Open your repository in your browser and click on the <strong>Actions</strong> tab in the top navigation bar.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      3
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">Trigger "Build Android APK" workflow</div>
+                      <p className="text-[11px] opacity-75 mt-0.5">
+                        In the left sidebar, click <strong>"Build Android APK"</strong>, then click the <strong>"Run workflow"</strong> dropdown button and press <strong>"Run workflow"</strong>.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-2.5">
+                    <div
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      4
+                    </div>
+                    <div>
+                      <div className="font-bold text-xs">Download APK from Artifacts & Install</div>
+                      <p className="text-[11px] opacity-75 mt-0.5">
+                        Once the GitHub runner finishes (~2-3 min), click on the completed run. Scroll down to <strong>Artifacts</strong>, click <strong>AndroidTerminalLauncher-Debug-APK</strong> to download <code className="font-mono">app-debug.apk</code>, and install it on your phone!
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Native Capabilities info */}
+              <div
+                className="p-3 rounded-lg border text-[11px] space-y-1.5"
+                style={{ borderColor: theme.borderColor, backgroundColor: `${theme.cardBg}80` }}
+              >
+                <div className="font-bold flex items-center gap-1.5" style={{ color: theme.accentColor }}>
+                  <Box size={14} />
+                  <span>What happens once the APK is installed on your phone?</span>
+                </div>
+                <ul className="list-disc pl-4 space-y-1 opacity-80 text-[11px]">
+                  <li>It automatically queries Android's native <code className="font-mono">PackageManager</code> for all user and system apps installed on your device.</li>
+                  <li>Clicking an app or typing <code className="font-mono">open &lt;app&gt;</code> launches the real application on your phone (no simulated modal).</li>
+                  <li>You can select it in <strong>Settings ➔ Default apps ➔ Home app</strong> as your phone's permanent launcher!</li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 2: SET AS DEFAULT ON PHONE */}
+          {activeTab === 'phone_settings' && (
+            <div className="space-y-4">
+              <div
+                className="p-3.5 rounded-xl border space-y-3"
+                style={{ borderColor: theme.borderColor, backgroundColor: theme.bg }}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 font-bold text-sm" style={{ color: theme.promptColor }}>
+                    <Smartphone size={16} />
+                    <span>SET AS DEFAULT HOME APP IN ANDROID SETTINGS</span>
+                  </div>
+                  <button
+                    onClick={handleOpenAndroidHomeSettings}
+                    className="px-3 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-md"
+                    style={{
+                      borderColor: theme.promptColor,
+                      color: theme.bg,
+                      backgroundColor: theme.promptColor,
+                    }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>Open Phone Home Settings</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] opacity-80 leading-relaxed">
+                  After installing the compiled APK, follow these steps to make this terminal your primary phone launcher:
+                </p>
+
+                <ol className="space-y-2.5 text-[11px] opacity-90 pl-1 pt-1">
+                  <li className="flex items-start gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      1
+                    </span>
+                    <span>
+                      Open your phone's <strong>Settings (⚙️)</strong>.
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      2
+                    </span>
+                    <span>
+                      Navigate to <strong>Apps</strong> (or <strong>Apps & Notifications</strong>) ➔ <strong>Default apps</strong>.
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      3
+                    </span>
+                    <span>
+                      Tap on <strong>Home app</strong> (or <strong>Default launcher</strong>).
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.accentColor}30`, color: theme.accentColor }}
+                    >
+                      4
+                    </span>
+                    <span>
+                      Select <strong>Android Terminal Launcher</strong> from the list.
+                    </span>
+                  </li>
+                  <li className="flex items-start gap-2">
+                    <span
+                      className="w-5 h-5 rounded-full flex items-center justify-center font-bold text-xs shrink-0 mt-0.5"
+                      style={{ backgroundColor: `${theme.successColor}30`, color: theme.successColor }}
+                    >
+                      ✓
+                    </span>
+                    <span>
+                      Pressing the hardware <strong>Home button</strong> or swiping up will now always open this terminal!
+                    </span>
+                  </li>
+                </ol>
+              </div>
+
+              {/* Note about Web Mode vs Native APK */}
+              <div
+                className="p-3 rounded-lg border text-[11px] space-y-1"
+                style={{ borderColor: `${theme.warningColor}50`, backgroundColor: `${theme.warningColor}15`, color: theme.warningColor }}
+              >
+                <div className="font-bold flex items-center gap-1.5">
+                  <HelpCircle size={14} />
+                  <span>Don't see "Android Terminal Launcher" in the Home app list?</span>
+                </div>
+                <p className="opacity-90 leading-relaxed text-[11px]">
+                  If you are currently viewing this in Chrome, Brave, or as an "Add to Home Screen" shortcut, Android will not list it as a Home app. You must build and install the native <strong>.apk</strong> via GitHub Actions (see Tab 1) or compile with Android Studio!
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* TAB 3: ADB COMMAND & MANIFEST */}
+          {activeTab === 'adb' && (
             <div className="space-y-4">
               {/* In-App Direct Install Trigger Card */}
               <div

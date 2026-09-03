@@ -63,7 +63,7 @@ export interface AndroidApp {
   category: 'system' | 'tools' | 'social' | 'media' | 'games' | 'dev';
   icon: string; // Lucide icon name or emoji
   description: string;
-  launchAction?: 'simulated' | 'url' | 'command';
+  launchAction?: 'url' | 'command';
   url?: string;
   commandToRun?: string;
   favorite?: boolean;

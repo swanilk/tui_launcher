@@ -40,6 +40,25 @@ jobs:
           fi
           npx @capacitor/cli sync android
 
+      - name: Patch AndroidManifest.xml for Default Home Launcher & Permissions
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if [ -f "$MANIFEST" ]; then
+            echo "Injecting Android Home Launcher intent & system permissions..."
+            
+            # Add QUERY_ALL_PACKAGES and permissions before </manifest>
+            sed -i '/<\/manifest>/i \    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />\n    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />\n    <uses-permission android:name="android.permission.CALL_PHONE" />\n    <uses-permission android:name="android.permission.SEND_SMS" />\n    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+            
+            # Add HOME and DEFAULT intent categories inside MainActivity intent-filter
+            sed -i '/<category android:name="android.intent.category.LAUNCHER" \/>/a \                <category android:name="android.intent.category.HOME" />\n                <category android:name="android.intent.category.DEFAULT" />' "$MANIFEST"
+            
+            # Set singleTask launchMode on MainActivity
+            sed -i 's/<activity/<activity android:launchMode="singleTask"/' "$MANIFEST"
+            
+            echo "Patched AndroidManifest.xml successfully:"
+            cat "$MANIFEST"
+          fi
+
       - name: Patch Kotlin stdlib resolution
         run: |
           # Ensure no duplicate kotlin-stdlib classes between 1.8+ and legacy jdk7/jdk8

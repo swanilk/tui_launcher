@@ -29,9 +29,11 @@ import {
   Package,
   Layers,
   Sparkles,
-  Home
+  Home,
+  RefreshCw
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
+import { isNativeAndroidApp } from '../utils/nativeLauncher';
 
 interface AppsTabProps {
   theme: Theme;
@@ -41,6 +43,8 @@ interface AppsTabProps {
   onToggleFavorite?: (appId: string) => void;
   onUninstallApp?: (app: AndroidApp) => void;
   onOpenDefaultLauncherModal?: () => void;
+  onSyncApps?: () => Promise<void> | void;
+  isSyncing?: boolean;
   soundEnabled: boolean;
 }
 
@@ -52,6 +56,8 @@ export const AppsTab: React.FC<AppsTabProps> = ({
   onToggleFavorite,
   onUninstallApp,
   onOpenDefaultLauncherModal,
+  onSyncApps,
+  isSyncing,
   soundEnabled,
 }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -178,6 +184,30 @@ export const AppsTab: React.FC<AppsTabProps> = ({
 
         {/* View Mode Switcher & App Count */}
         <div className="flex items-center gap-1.5 shrink-0">
+          {onSyncApps && (
+            <button
+              type="button"
+              id="btn-sync-phone-apps"
+              onClick={() => {
+                if (soundEnabled) soundManager.playKeyClick('mechanical', 0.2);
+                onSyncApps();
+              }}
+              disabled={isSyncing}
+              className="flex items-center gap-1 px-2 py-1 rounded border text-[10px] font-bold transition-all hover:opacity-90 active:scale-95 cursor-pointer"
+              style={{
+                borderColor: theme.accentColor,
+                backgroundColor: `${theme.accentColor}18`,
+                color: theme.accentColor,
+              }}
+              title="Scan all applications installed on your phone via Android PackageManager"
+            >
+              <RefreshCw size={11} className={isSyncing ? 'animate-spin' : ''} />
+              <span className="hidden sm:inline">
+                {isSyncing ? 'Scanning Phone...' : isNativeAndroidApp() ? 'Sync Phone Apps' : 'Scan Phone Apps'}
+              </span>
+            </button>
+          )}
+
           <span className="text-[11px] opacity-70 hidden sm:inline">
             {filteredApps.length} apps
           </span>

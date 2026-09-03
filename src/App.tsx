@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   Theme, 
   TerminalLine, 
@@ -42,7 +42,6 @@ import { TouchToolbar } from './components/TouchToolbar';
 import { AppsTab } from './components/AppsTab';
 import { NotifsTab } from './components/NotifsTab';
 import { TermTab } from './components/TermTab';
-import { AppViewerModal } from './components/AppViewerModal';
 import { NanoEditor } from './components/NanoEditor';
 import { HistorySearchModal } from './components/HistorySearchModal';
 import { ThemeSelectorModal } from './components/ThemeSelectorModal';
@@ -52,6 +51,7 @@ import { DefaultLauncherModal } from './components/DefaultLauncherModal';
 import { MatrixScreen } from './components/MatrixScreen';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { soundManager } from './utils/audio';
+import { getNativeInstalledApps, launchNativeAndroidApp, isNativeAndroidApp } from './utils/nativeLauncher';
 
 export default function App() {
   // Active Main Tab: 'apps' | 'notifs' | 'term'
@@ -99,11 +99,65 @@ export default function App() {
     }
   });
 
+  const [isSyncingApps, setIsSyncingApps] = useState(false);
+
   useEffect(() => {
     try {
       localStorage.setItem('android_tui_apps', JSON.stringify(apps));
     } catch {}
   }, [apps]);
+
+  // Synchronize real phone apps installed on device via Android PackageManager
+  const handleSyncNativeApps = useCallback(async () => {
+    setIsSyncingApps(true);
+    try {
+      const nativeApps = await getNativeInstalledApps();
+      if (nativeApps && nativeApps.length > 0) {
+        setApps((prev) => {
+          const favoritePkgs = new Set(prev.filter((a) => a.favorite).map((a) => a.packageName));
+          return nativeApps.map((na) => ({
+            ...na,
+            favorite: favoritePkgs.has(na.packageName),
+          }));
+        });
+        setLines((prev) => [
+          ...prev,
+          {
+            id: `sync-${Date.now()}`,
+            timestamp: Date.now(),
+            type: 'success',
+            content: `[✓] Successfully synchronized ${nativeApps.length} installed applications from Android device.`,
+          },
+        ]);
+        return { success: true, count: nativeApps.length, message: `Synchronized ${nativeApps.length} apps.` };
+      } else {
+        if (!isNativeAndroidApp()) {
+          setLines((prev) => [
+            ...prev,
+            {
+              id: `sync-${Date.now()}`,
+              timestamp: Date.now(),
+              type: 'system',
+              content: `[ℹ] Browser Sandbox Notice: Web browsers cannot query private phone applications.\nCompile and install the native Android APK via GitHub Actions to display 100% of your real phone apps!`,
+            },
+          ]);
+        }
+        return { success: false, count: 0, message: 'Web environment: use compiled APK on phone.' };
+      }
+    } catch (err: any) {
+      console.warn('Native apps scan error:', err);
+      return { success: false, count: 0, message: err?.message || 'Error scanning apps' };
+    } finally {
+      setIsSyncingApps(false);
+    }
+  }, []);
+
+  // Auto-scan real phone apps when running inside the native APK
+  useEffect(() => {
+    if (isNativeAndroidApp()) {
+      handleSyncNativeApps();
+    }
+  }, [handleSyncNativeApps]);
 
   // Persistent Notifications
   const [notifications, setNotifications] = useState<AppNotification[]>(() => {
@@ -264,7 +318,7 @@ export default function App() {
       id: 'boot-1',
       timestamp: Date.now() - 3000,
       type: 'system',
-      content: `[  OK  ] Mounted Android 15 Virtual Subsystem (aarch64)\n[  OK  ] Initialized Termux TUI Shell Environment\n[  OK  ] Loaded 14 applications & 7 shell aliases`,
+      content: `[  OK  ] Mounted Android 15 Storage Subsystem (aarch64)\n[  OK  ] Initialized Termux TUI Shell Environment\n[  OK  ] Loaded 14 applications & 7 shell aliases`,
     },
     {
       id: 'boot-2',
@@ -288,7 +342,6 @@ Press [Tab] anytime for auto-completion.`,
   ]);
 
   // 12. Modal & View States
-  const [activeAppModal, setActiveAppModal] = useState<AndroidApp | null>(null);
   const [activeNanoModal, setActiveNanoModal] = useState<{ filename: string; content: string } | null>(null);
   const [isThemeModalOpen, setIsThemeModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -298,10 +351,37 @@ Press [Tab] anytime for auto-completion.`,
   const [isMatrixActive, setIsMatrixActive] = useState(false);
 
   // 13. Telemetry: Battery and Wifi
-  const [batteryLevel, setBatteryLevel] = useState(87);
+  const [batteryLevel, setBatteryLevel] = useState(100);
   const [isCharging, setIsCharging] = useState(false);
   const [powerSaver, setPowerSaver] = useState(false);
-  const wifiSsid = 'AndroidNet_5GHz';
+  const [networkInfo, setNetworkInfo] = useState<{ isOnline: boolean; type: string }>({
+    isOnline: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    type: typeof navigator !== 'undefined' && (navigator as any).connection?.effectiveType
+      ? (navigator as any).connection.effectiveType.toUpperCase()
+      : 'Broadband/Wi-Fi',
+  });
+
+  useEffect(() => {
+    const updateNet = () => {
+      const conn = (navigator as any).connection;
+      const typeStr = conn?.effectiveType ? conn.effectiveType.toUpperCase() : (navigator.onLine ? 'Broadband/Wi-Fi' : 'Offline');
+      setNetworkInfo({
+        isOnline: navigator.onLine,
+        type: typeStr,
+      });
+    };
+    window.addEventListener('online', updateNet);
+    window.addEventListener('offline', updateNet);
+    if ((navigator as any).connection) {
+      (navigator as any).connection.addEventListener('change', updateNet);
+    }
+    return () => {
+      window.removeEventListener('online', updateNet);
+      window.removeEventListener('offline', updateNet);
+    };
+  }, []);
+
+  const wifiSsid = networkInfo.isOnline ? `Online (${networkInfo.type})` : 'Offline (No Connection)';
 
   useEffect(() => {
     if (typeof navigator !== 'undefined' && 'getBattery' in navigator) {
@@ -404,6 +484,34 @@ Press [Tab] anytime for auto-completion.`,
     return () => window.removeEventListener('keydown', handleGlobalShortcuts);
   }, []);
 
+  const executeCommandRef = useRef<(cmd: string) => void>(() => {});
+
+  // Handle launching an application directly on the Android phone
+  const handleLaunchApp = useCallback(
+    async (app: AndroidApp) => {
+      if (app.launchAction === 'command' && app.commandToRun) {
+        executeCommandRef.current(app.commandToRun);
+        return;
+      }
+      // Update lastUsed timestamp
+      setApps((prev) =>
+        prev.map((a) => (a.id === app.id ? { ...a, lastUsed: Date.now() } : a))
+      );
+
+      const res = await launchNativeAndroidApp(app);
+      setLines((prev) => [
+        ...prev,
+        {
+          id: `launch-${Date.now()}`,
+          timestamp: Date.now(),
+          type: res.success ? 'success' : 'system',
+          content: `[✓] Launching ${app.name} (${app.packageName})...\n    Method: ${res.method} • ${res.message}`,
+        },
+      ]);
+    },
+    []
+  );
+
   // 15. Command Execution Callback
   const handleExecuteCommand = useCallback(
     async (rawCommand: string) => {
@@ -474,7 +582,7 @@ Press [Tab] anytime for auto-completion.`,
         history,
         clearHistory: () => setHistory([]),
         clearTerminal: () => setLines([]),
-        openAppModal: (app: AndroidApp) => setActiveAppModal(app),
+        openAppModal: handleLaunchApp,
         openNanoModal: (filename: string, content: string) => setActiveNanoModal({ filename, content }),
         openThemeModal: () => setIsThemeModalOpen(true),
         openHistoryModal: () => setIsHistoryModalOpen(true),
@@ -489,6 +597,7 @@ Press [Tab] anytime for auto-completion.`,
         isCharging,
         batteryData: batteryTelemetry,
         wifiSsid,
+        syncNativeApps: handleSyncNativeApps,
       };
 
       try {
@@ -524,10 +633,13 @@ Press [Tab] anytime for auto-completion.`,
     [config, currentTheme, apps, aliases, scripts, notes, todos, contacts, recentCalls, bluetoothState, timers, history, batteryLevel, isCharging, wifiSsid, batteryTelemetry]
   );
 
+  useEffect(() => {
+    executeCommandRef.current = handleExecuteCommand;
+  }, [handleExecuteCommand]);
+
   // 16. Touch Bar Key Injection
   const handleTouchKeyPress = (key: string) => {
     if (key === 'Escape') {
-      setActiveAppModal(null);
       setActiveNanoModal(null);
       setIsThemeModalOpen(false);
       setIsHistoryModalOpen(false);
@@ -623,14 +735,10 @@ Press [Tab] anytime for auto-completion.`,
           <AppsTab
             theme={currentTheme}
             apps={apps}
-            onOpenApp={(app) => {
-              if (app.launchAction === 'command' && app.commandToRun) {
-                handleExecuteCommand(app.commandToRun);
-              } else {
-                setActiveAppModal(app);
-              }
-            }}
+            onOpenApp={handleLaunchApp}
             onRunCommand={handleExecuteCommand}
+            onSyncApps={handleSyncNativeApps}
+            isSyncing={isSyncingApps}
             onToggleFavorite={(appId) => {
               setApps((prev) =>
                 prev.map((a) => (a.id === appId ? { ...a, favorite: !a.favorite } : a))
@@ -658,7 +766,7 @@ Press [Tab] anytime for auto-completion.`,
               setNotifications((prev) => [notif, ...prev]);
             }}
             onRunCommand={handleExecuteCommand}
-            onOpenApp={(app) => setActiveAppModal(app)}
+            onOpenApp={handleLaunchApp}
             apps={apps}
             soundEnabled={config.soundEnabled}
           />
@@ -669,13 +777,7 @@ Press [Tab] anytime for auto-completion.`,
             lines={lines}
             theme={currentTheme}
             onRunQuickCommand={handleExecuteCommand}
-            onOpenApp={(app) => {
-              if (app.launchAction === 'command' && app.commandToRun) {
-                handleExecuteCommand(app.commandToRun);
-              } else {
-                setActiveAppModal(app);
-              }
-            }}
+            onOpenApp={handleLaunchApp}
             onClearTerminal={() => setLines([])}
             apps={apps}
             soundEnabled={config.soundEnabled}
@@ -718,16 +820,6 @@ Press [Tab] anytime for auto-completion.`,
           />
         )}
       </div>
-
-      {/* App Viewer Modal */}
-      {activeAppModal && (
-        <AppViewerModal
-          app={activeAppModal}
-          theme={currentTheme}
-          onClose={() => setActiveAppModal(null)}
-          onRunTerminalCmd={handleExecuteCommand}
-        />
-      )}
 
       {/* Micro TUI Nano/Vim Text Editor Modal */}
       {activeNanoModal && (

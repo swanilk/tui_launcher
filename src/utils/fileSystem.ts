@@ -6,13 +6,22 @@
 import { VirtualFile } from '../types';
 import { INITIAL_FILESYSTEM } from '../data/defaultData';
 
-const FS_STORAGE_KEY = 'android_tui_filesystem_v1';
+const FS_STORAGE_KEY = 'android_storage_system_v3';
 
 export class VirtualFS {
   private root: VirtualFile[];
-  private currentPath: string = '/home/u0_a284';
+  private currentPath: string = '/storage/emulated/0';
+  private mountedDirectoryHandle: any = null;
+  private mountedDirName: string = '';
 
   constructor() {
+    // Clear legacy simulated filesystem cache
+    try {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.removeItem('android_tui_filesystem_v2');
+      }
+    } catch {}
+
     this.root = this.loadFileSystem();
   }
 
@@ -20,10 +29,13 @@ export class VirtualFS {
     try {
       const stored = localStorage.getItem(FS_STORAGE_KEY);
       if (stored) {
-        return JSON.parse(stored);
+        const parsed: VirtualFile[] = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
       }
     } catch {}
-    return INITIAL_FILESYSTEM;
+    return JSON.parse(JSON.stringify(INITIAL_FILESYSTEM));
   }
 
   private saveFileSystem(): void {
@@ -37,17 +49,36 @@ export class VirtualFS {
   }
 
   public getDisplayPwd(): string {
-    if (this.currentPath === '/home/u0_a284') return '~';
-    if (this.currentPath.startsWith('/home/u0_a284/')) {
-      return '~' + this.currentPath.slice('/home/u0_a284'.length);
+    if (this.currentPath === '/storage/emulated/0') return '~/storage';
+    if (this.currentPath.startsWith('/storage/emulated/0/')) {
+      return '~/storage/' + this.currentPath.slice('/storage/emulated/0/'.length);
     }
     return this.currentPath;
   }
 
+  public setMountedDirectoryHandle(handle: any): void {
+    this.mountedDirectoryHandle = handle;
+    this.mountedDirName = handle?.name || 'Selected Storage Folder';
+  }
+
+  public getMountedDirectoryHandle(): any {
+    return this.mountedDirectoryHandle;
+  }
+
+  public getMountedDirName(): string {
+    return this.mountedDirName;
+  }
+
+  public clearMountedDirectory(): void {
+    this.mountedDirectoryHandle = null;
+    this.mountedDirName = '';
+  }
+
   public resolvePath(target: string): string {
     if (!target || target === '.') return this.currentPath;
-    if (target === '~') return '/home/u0_a284';
-    if (target.startsWith('~/')) return '/home/u0_a284/' + target.slice(2);
+    if (target === '~' || target === '~/storage' || target === 'storage') return '/storage/emulated/0';
+    if (target.startsWith('~/')) return '/storage/emulated/0/' + target.slice(2);
+    if (target === 'shared' || target === '/sdcard') return '/storage/emulated/0';
 
     let parts: string[];
     if (target.startsWith('/')) {
@@ -66,7 +97,13 @@ export class VirtualFS {
       }
     }
 
-    return '/' + resolved.join('/');
+    const full = '/' + resolved.join('/');
+    if (full === '/sdcard') return '/storage/emulated/0';
+    if (full.startsWith('/sdcard/')) {
+      return '/storage/emulated/0/' + full.slice('/sdcard/'.length);
+    }
+
+    return full;
   }
 
   public getNode(pathStr: string): VirtualFile | null {
@@ -86,25 +123,100 @@ export class VirtualFS {
 
     for (let i = 0; i < parts.length; i++) {
       const part = parts[i];
-      if (!currentChildren) return null;
-      const found = currentChildren.find((c) => c.name === part);
-      if (!found) return null;
+      if (!currentChildren) break;
+      const found = currentChildren.find((c) => c.name.toLowerCase() === part.toLowerCase());
+      if (!found) {
+        currentNode = null;
+        break;
+      }
       currentNode = found;
       currentChildren = found.children;
     }
 
-    return currentNode;
+    if (currentNode) {
+      return currentNode;
+    }
+
+    return null;
   }
 
-  public listDir(pathStr: string = '.'): { success: boolean; files?: VirtualFile[]; error?: string } {
+  /**
+   * List files asynchronously with support for mounted Storage Access Framework directory handle
+   */
+  public async listStorageEntries(pathStr: string = '.'): Promise<{
+    success: boolean;
+    files: Array<{ name: string; isDirectory: boolean; size: number; lastModified: number }>;
+    source: 'mounted_saf' | 'internal';
+    resolvedPath: string;
+  }> {
+    const resolved = this.resolvePath(pathStr);
+
+    if (this.mountedDirectoryHandle) {
+      try {
+        const entries: Array<{ name: string; isDirectory: boolean; size: number; lastModified: number }> = [];
+        for await (const [name, handle] of (this.mountedDirectoryHandle as any).entries()) {
+          const isDir = handle.kind === 'directory';
+          let size = 0;
+          let lastModified = Date.now();
+          if (!isDir && typeof handle.getFile === 'function') {
+            try {
+              const file = await handle.getFile();
+              size = file.size;
+              lastModified = file.lastModified;
+            } catch {}
+          }
+          entries.push({
+            name,
+            isDirectory: isDir,
+            size,
+            lastModified,
+          });
+        }
+        return {
+          success: true,
+          files: entries,
+          source: 'mounted_saf',
+          resolvedPath: `[SAF Mounted: ${this.mountedDirName}]`,
+        };
+      } catch (err) {
+        console.warn('Mounted SAF read error:', err);
+      }
+    }
+
     const node = this.getNode(pathStr);
+    if (!node) {
+      return {
+        success: false,
+        files: [],
+        source: 'internal',
+        resolvedPath: resolved,
+      };
+    }
+
+    const children = node.type === 'dir' ? node.children || [] : [node];
+    return {
+      success: true,
+      files: children.map((c) => ({
+        name: c.name,
+        isDirectory: c.type === 'dir',
+        size: c.size || 0,
+        lastModified: c.updatedAt,
+      })),
+      source: 'internal',
+      resolvedPath: resolved,
+    };
+  }
+
+  public listDir(pathStr: string = '.'): { success: boolean; files?: VirtualFile[]; error?: string; resolvedPath?: string } {
+    const node = this.getNode(pathStr);
+    const resolved = this.resolvePath(pathStr);
     if (!node) {
       return { success: false, error: `ls: cannot access '${pathStr}': No such file or directory` };
     }
     if (node.type !== 'dir') {
-      return { success: true, files: [node] };
+      return { success: true, files: [node], resolvedPath: resolved };
     }
-    return { success: true, files: node.children || [] };
+    return { success: true, files: node.children || [], resolvedPath: resolved };
   }
 
   public changeDir(target: string): { success: boolean; error?: string } {
@@ -169,6 +281,20 @@ export class VirtualFS {
     return { success: true };
   }
 
+  public async writeStorageFile(pathStr: string, content: string): Promise<{ success: boolean; error?: string }> {
+    if (this.mountedDirectoryHandle) {
+      try {
+        const fileHandle = await (this.mountedDirectoryHandle as any).getFileHandle(pathStr, { create: true });
+        const writable = await fileHandle.createWritable();
+        await writable.write(content);
+        await writable.close();
+      } catch (err: any) {
+        console.warn('SAF file write note:', err);
+      }
+    }
+    return this.writeFile(pathStr, content);
+  }
+
   public makeDir(pathStr: string): { success: boolean; error?: string } {
     const fullPath = this.resolvePath(pathStr);
     const parts = fullPath.split('/').filter(Boolean);
@@ -224,9 +350,10 @@ export class VirtualFS {
 
   public resetFS(): void {
     this.root = JSON.parse(JSON.stringify(INITIAL_FILESYSTEM));
-    this.currentPath = '/home/u0_a284';
+    this.currentPath = '/storage/emulated/0';
     this.saveFileSystem();
   }
 }
 
 export const virtualFS = new VirtualFS();
+export const androidStorage = virtualFS;

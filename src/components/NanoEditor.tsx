@@ -50,8 +50,8 @@ export const NanoEditor: React.FC<NanoEditorProps> = ({
     });
   };
 
-  const handleSave = () => {
-    virtualFS.writeFile(filename, content);
+  const handleSave = async () => {
+    await virtualFS.writeStorageFile(filename, content);
     onSave(filename, content);
     if (soundEnabled) soundManager.playSuccess(0.2);
     setStatusMessage(`[ Written ${content.length} bytes to ${filename} ]`);

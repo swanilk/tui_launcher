@@ -208,9 +208,11 @@ export const StatusBar: React.FC<StatusBarProps> = ({
 
       {/* Right side: High Density System Metrics (MEM, BAT, CONNECTED) */}
       <div className="flex items-center gap-2 sm:gap-3 text-[11px] font-mono shrink-0">
-        <span className="hidden xl:inline opacity-70 text-[10px]">
-          MEM: 4.2GB / 8GB
-        </span>
+        {typeof navigator !== 'undefined' && (navigator as any).deviceMemory && (
+          <span className="hidden xl:inline opacity-70 text-[10px]">
+            RAM: {(navigator as any).deviceMemory}GB
+          </span>
+        )}
 
         {/* Bluetooth Telemetry Indicator */}
         {bluetoothState && (
@@ -285,10 +287,19 @@ export const StatusBar: React.FC<StatusBarProps> = ({
           )}
         </button>
 
-        {/* Connected Indicator */}
-        <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold" style={{ color: theme.successColor }}>
-          <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: theme.successColor }}></span>
-          <span className="hidden sm:inline">CONNECTED</span>
+        {/* Network Status Indicator */}
+        <div 
+          className="flex items-center gap-1.5 text-[10px] sm:text-[11px] font-bold"
+          style={{ color: (typeof navigator !== 'undefined' && !navigator.onLine) ? theme.errorColor : theme.successColor }}
+          title={wifiSsid}
+        >
+          <span 
+            className={`w-2 h-2 rounded-full ${(typeof navigator !== 'undefined' && !navigator.onLine) ? '' : 'animate-pulse'}`} 
+            style={{ backgroundColor: (typeof navigator !== 'undefined' && !navigator.onLine) ? theme.errorColor : theme.successColor }}
+          />
+          <span className="hidden sm:inline">
+            {(typeof navigator !== 'undefined' && !navigator.onLine) ? 'OFFLINE' : 'ONLINE'}
+          </span>
         </div>
 
         {/* Toggles */}

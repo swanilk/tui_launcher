@@ -448,16 +448,37 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       }
 
       // Case 4C: User typed "bluetooth" or "bt" alone (or with subcommands in progress)
-      if (!rest || ['on', 'off', 'toggle', 'scan', 'devices', 'pair', 'unpair', 'status', 'connect', 'disconnect'].some((s) => s.startsWith(rest))) {
-        // Quick toggle / on / off power
+      if (!rest || ['on', 'off', 'toggle', 'scan', 'devices', 'pair', 'unpair', 'status', 'connect', 'disconnect', 'settings', 'config'].some((s) => s.startsWith(rest))) {
+        // Quick Power ON
         items.push({
-          id: 'bt-toggle',
+          id: 'bt-power-on',
           type: 'subcommand',
-          label: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
-          subtitle: `Power ${isEnabled ? 'OFF' : 'ON'} Bluetooth Adapter (Radio is ${isEnabled ? 'ACTIVE / 2.4GHz' : 'SLEEP / DISABLED'})`,
-          value: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
-          fullReplacement: `${btCmd} ${isEnabled ? 'off' : 'on'}`,
+          label: `${btCmd} on`,
+          subtitle: `Turn ON Android Bluetooth Adapter Radio (2.4GHz ISM)`,
+          value: `${btCmd} on`,
+          fullReplacement: `${btCmd} on`,
           actionKind: 'bluetooth_toggle',
+        });
+
+        // Quick Power OFF
+        items.push({
+          id: 'bt-power-off',
+          type: 'subcommand',
+          label: `${btCmd} off`,
+          subtitle: `Turn OFF Android Bluetooth Adapter Radio (Low Power Sleep)`,
+          value: `${btCmd} off`,
+          fullReplacement: `${btCmd} off`,
+          actionKind: 'bluetooth_toggle',
+        });
+
+        // Scan subcommand
+        items.push({
+          id: 'bt-scan-sub',
+          type: 'subcommand',
+          label: `${btCmd} scan`,
+          subtitle: 'Scan & Discover nearby Bluetooth LE and Classic peripherals',
+          value: `${btCmd} scan`,
+          fullReplacement: `${btCmd} scan`,
         });
 
         // Connect subcommand with interactive device list
@@ -470,16 +491,6 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           fullReplacement: `${btCmd} connect `,
         });
 
-        // Scan subcommand
-        items.push({
-          id: 'bt-scan-sub',
-          type: 'subcommand',
-          label: `${btCmd} scan`,
-          subtitle: 'Discover nearby Bluetooth LE and Classic peripherals',
-          value: `${btCmd} scan`,
-          fullReplacement: `${btCmd} scan`,
-        });
-
         // Disconnect subcommand
         items.push({
           id: 'bt-disconnect-sub',
@@ -488,6 +499,16 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           subtitle: 'Disconnect active Bluetooth audio or peripherals',
           value: `${btCmd} disconnect`,
           fullReplacement: `${btCmd} disconnect`,
+        });
+
+        // Settings subcommand
+        items.push({
+          id: 'bt-settings-sub',
+          type: 'subcommand',
+          label: `${btCmd} settings`,
+          subtitle: 'Open Android OS Bluetooth System Settings',
+          value: `${btCmd} settings`,
+          fullReplacement: `${btCmd} settings`,
         });
 
         // List devices subcommand
@@ -634,7 +655,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           subtitle = `${matchedApp.packageName} • [Launch Direct]`;
         } else if (scripts.some((s) => s.name === m)) {
           type = 'file';
-          subtitle = 'Virtual Shell Script';
+          subtitle = 'Shell Script';
         }
 
         return {
