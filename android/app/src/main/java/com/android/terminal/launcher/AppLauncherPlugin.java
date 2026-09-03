@@ -9,6 +9,7 @@ import android.content.pm.ResolveInfo;
 import android.net.Uri;
 import android.os.Environment;
 import android.provider.Settings;
+import androidx.core.app.NotificationManagerCompat;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -47,9 +48,16 @@ public class AppLauncherPlugin extends Plugin {
 
             JSArray appsArray = new JSArray();
             String myPackageName = getContext().getPackageName();
+            Set<String> seenPackages = new java.util.HashSet<>();
 
             for (ResolveInfo ri : pkgAppsList) {
                 String pkgName = ri.activityInfo.packageName;
+                if (pkgName == null || pkgName.isEmpty()) continue;
+                if (seenPackages.contains(pkgName)) {
+                    continue;
+                }
+                seenPackages.add(pkgName);
+
                 // Exclude self from launcher app drawer if desired or keep it
                 String appName = ri.loadLabel(pm).toString();
                 String activityName = ri.activityInfo.name;
@@ -310,25 +318,28 @@ public class AppLauncherPlugin extends Plugin {
         }
     }
 
+    private File resolveFile(String subPath, File root) {
+        if (subPath == null || subPath.isEmpty() || subPath.equals(".") || subPath.equals("~")
+                || subPath.equals("/sdcard") || subPath.equals("/storage/emulated/0")) {
+            return root;
+        }
+        if (subPath.startsWith("/sdcard/")) {
+            return new File(root, subPath.substring("/sdcard/".length()));
+        } else if (subPath.startsWith("/storage/emulated/0/")) {
+            return new File(root, subPath.substring("/storage/emulated/0/".length()));
+        } else if (subPath.startsWith("/")) {
+            return new File(subPath);
+        } else {
+            return new File(root, subPath);
+        }
+    }
+
     @PluginMethod
     public void listStorageFiles(PluginCall call) {
         String subPath = call.getString("path", "");
         try {
             File root = Environment.getExternalStorageDirectory();
-            File targetDir = root;
-
-            if (subPath != null && !subPath.isEmpty() && !subPath.equals(".") && !subPath.equals("~")
-                    && !subPath.equals("/sdcard") && !subPath.equals("/storage/emulated/0")) {
-                if (subPath.startsWith("/sdcard/")) {
-                    targetDir = new File(root, subPath.substring("/sdcard/".length()));
-                } else if (subPath.startsWith("/storage/emulated/0/")) {
-                    targetDir = new File(root, subPath.substring("/storage/emulated/0/".length()));
-                } else if (subPath.startsWith("/")) {
-                    targetDir = new File(subPath);
-                } else {
-                    targetDir = new File(root, subPath);
-                }
-            }
+            File targetDir = resolveFile(subPath, root);
 
             if (!targetDir.exists()) {
                 // If directory doesn't exist, try resolving relative to files dir or root
@@ -339,6 +350,11 @@ public class AppLauncherPlugin extends Plugin {
                     call.reject("Path not found: " + targetDir.getAbsolutePath());
                     return;
                 }
+            }
+
+            if (!targetDir.isDirectory()) {
+                call.reject("Not a directory: " + targetDir.getAbsolutePath());
+                return;
             }
 
             File[] files = targetDir.listFiles();
@@ -369,6 +385,128 @@ public class AppLauncherPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void checkDirectory(PluginCall call) {
+        String subPath = call.getString("path", "");
+        try {
+            File root = Environment.getExternalStorageDirectory();
+            File targetDir = resolveFile(subPath, root);
+
+            if (!targetDir.exists()) {
+                File fallback = new File(getContext().getFilesDir(), subPath != null ? subPath : "");
+                if (fallback.exists() && fallback.isDirectory()) {
+                    targetDir = fallback;
+                } else {
+                    JSObject ret = new JSObject();
+                    ret.put("success", false);
+                    ret.put("exists", false);
+                    ret.put("isDirectory", false);
+                    ret.put("error", "No such file or directory: " + targetDir.getAbsolutePath());
+                    call.resolve(ret);
+                    return;
+                }
+            }
+
+            if (!targetDir.isDirectory()) {
+                JSObject ret = new JSObject();
+                ret.put("success", false);
+                ret.put("exists", true);
+                ret.put("isDirectory", false);
+                ret.put("error", "Not a directory: " + targetDir.getAbsolutePath());
+                call.resolve(ret);
+                return;
+            }
+
+            JSObject res = new JSObject();
+            res.put("success", true);
+            res.put("exists", true);
+            res.put("isDirectory", true);
+            res.put("absolutePath", targetDir.getAbsolutePath());
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Error checking directory: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void readStorageFile(PluginCall call) {
+        String subPath = call.getString("path", "");
+        try {
+            File root = Environment.getExternalStorageDirectory();
+            File targetFile = resolveFile(subPath, root);
+            if (!targetFile.exists()) {
+                File fallback = new File(getContext().getFilesDir(), subPath != null ? subPath : "");
+                if (fallback.exists() && !fallback.isDirectory()) {
+                    targetFile = fallback;
+                } else {
+                    call.reject("File not found: " + targetFile.getAbsolutePath());
+                    return;
+                }
+            }
+            if (targetFile.isDirectory()) {
+                call.reject("Is a directory: " + targetFile.getAbsolutePath());
+                return;
+            }
+            if (targetFile.length() > 5 * 1024 * 1024) {
+                call.reject("File too large (max 5MB): " + targetFile.getAbsolutePath());
+                return;
+            }
+            byte[] bytes = java.nio.file.Files.readAllBytes(targetFile.toPath());
+            String content = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+            JSObject res = new JSObject();
+            res.put("success", true);
+            res.put("content", content);
+            res.put("size", targetFile.length());
+            res.put("absolutePath", targetFile.getAbsolutePath());
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Error reading file: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void writeStorageFile(PluginCall call) {
+        String subPath = call.getString("path", "");
+        String content = call.getString("content", "");
+        boolean append = Boolean.TRUE.equals(call.getBoolean("append", false));
+        try {
+            File root = Environment.getExternalStorageDirectory();
+            File targetFile = resolveFile(subPath, root);
+            File parent = targetFile.getParentFile();
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs();
+            }
+            if (targetFile.exists() && targetFile.isDirectory()) {
+                call.reject("Is a directory: " + targetFile.getAbsolutePath());
+                return;
+            }
+            java.nio.file.StandardOpenOption[] options;
+            if (append) {
+                options = new java.nio.file.StandardOpenOption[]{
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.StandardOpenOption.APPEND
+                };
+            } else {
+                options = new java.nio.file.StandardOpenOption[]{
+                    java.nio.file.StandardOpenOption.CREATE,
+                    java.nio.file.StandardOpenOption.WRITE,
+                    java.nio.file.StandardOpenOption.TRUNCATE_EXISTING
+                };
+            }
+            byte[] bytes = content != null ? content.getBytes(java.nio.charset.StandardCharsets.UTF_8) : new byte[0];
+            java.nio.file.Files.write(targetFile.toPath(), bytes, options);
+
+            JSObject res = new JSObject();
+            res.put("success", true);
+            res.put("absolutePath", targetFile.getAbsolutePath());
+            res.put("size", targetFile.length());
+            call.resolve(res);
+        } catch (Exception e) {
+            call.reject("Error writing file: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
     public void setBluetoothEnabled(PluginCall call) {
         Boolean enabled = call.getBoolean("enabled", true);
         try {
@@ -380,33 +518,52 @@ public class AppLauncherPlugin extends Plugin {
 
             if (Boolean.TRUE.equals(enabled)) {
                 if (!adapter.isEnabled()) {
-                    Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-                    enableBtIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(enableBtIntent);
+                    try {
+                        Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+                        enableBtIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        getContext().startActivity(enableBtIntent);
+                    } catch (Exception ex) {
+                        // On Android 12+ or devices without BLUETOOTH_CONNECT runtime grant, open settings
+                        Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        getContext().startActivity(intent);
+                    }
                 }
                 JSObject res = new JSObject();
                 res.put("success", true);
                 res.put("state", "enabling");
                 call.resolve(res);
             } else {
+                boolean disabled = false;
                 try {
-                    adapter.disable();
-                    JSObject res = new JSObject();
-                    res.put("success", true);
-                    res.put("state", "disabled");
-                    call.resolve(res);
-                } catch (Exception ex) {
-                    Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
-                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                    getContext().startActivity(intent);
-                    JSObject res = new JSObject();
-                    res.put("success", true);
-                    res.put("state", "settings_opened");
-                    call.resolve(res);
+                    disabled = adapter.disable();
+                } catch (Exception ignored) {}
+
+                if (!disabled) {
+                    try {
+                        Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                        getContext().startActivity(intent);
+                    } catch (Exception ignored) {}
                 }
+
+                JSObject res = new JSObject();
+                res.put("success", true);
+                res.put("state", disabled ? "disabled" : "settings_opened");
+                call.resolve(res);
             }
         } catch (Exception e) {
-            call.reject("Bluetooth state error: " + e.getMessage());
+            try {
+                Intent intent = new Intent(Settings.ACTION_BLUETOOTH_SETTINGS);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(intent);
+                JSObject res = new JSObject();
+                res.put("success", true);
+                res.put("state", "settings_opened");
+                call.resolve(res);
+            } catch (Exception ex) {
+                call.reject("Bluetooth state error: " + e.getMessage());
+            }
         }
     }
 
@@ -420,16 +577,26 @@ public class AppLauncherPlugin extends Plugin {
             }
 
             JSArray list = new JSArray();
-            Set<BluetoothDevice> paired = adapter.getBondedDevices();
-            if (paired != null) {
-                for (BluetoothDevice dev : paired) {
-                    JSObject obj = new JSObject();
-                    obj.put("name", dev.getName() != null ? dev.getName() : "Unknown Peripheral");
-                    obj.put("address", dev.getAddress());
-                    obj.put("bonded", true);
-                    obj.put("type", dev.getType());
-                    list.put(obj);
+            try {
+                Set<BluetoothDevice> paired = adapter.getBondedDevices();
+                if (paired != null) {
+                    for (BluetoothDevice dev : paired) {
+                        JSObject obj = new JSObject();
+                        String name = "Unknown Peripheral";
+                        try {
+                            name = dev.getName() != null ? dev.getName() : "Unknown Peripheral";
+                        } catch (SecurityException ignored) {}
+                        obj.put("name", name);
+                        obj.put("address", dev.getAddress());
+                        obj.put("bonded", true);
+                        try {
+                            obj.put("type", dev.getType());
+                        } catch (SecurityException ignored) {}
+                        list.put(obj);
+                    }
                 }
+            } catch (SecurityException secEx) {
+                // Runtime permission not yet granted on Android 12+
             }
 
             try {
@@ -478,6 +645,84 @@ public class AppLauncherPlugin extends Plugin {
             call.resolve(res);
         } catch (Exception e) {
             call.reject("Could not open Bluetooth connect: " + e.getMessage());
+        }
+    }
+
+    @Override
+    public void load() {
+        super.load();
+        TuiNotificationListener.setCallback(new TuiNotificationListener.NotificationCallback() {
+            @Override
+            public void onNotificationPosted(JSObject notif) {
+                notifyListeners("notificationPosted", notif);
+            }
+
+            @Override
+            public void onNotificationRemoved(String id) {
+                JSObject data = new JSObject();
+                data.put("id", id);
+                notifyListeners("notificationRemoved", data);
+            }
+        });
+    }
+
+    @PluginMethod
+    public void getActiveNotifications(PluginCall call) {
+        try {
+            if (TuiNotificationListener.getInstance() != null) {
+                TuiNotificationListener.getInstance().refreshActiveNotifications();
+            }
+            JSArray notifs = TuiNotificationListener.getActiveNotificationsArray();
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("notifications", notifs);
+            ret.put("count", notifs.length());
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Could not get notifications: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void isNotificationAccessGranted(PluginCall call) {
+        try {
+            Set<String> packages = NotificationManagerCompat.getEnabledListenerPackages(getContext());
+            boolean granted = packages != null && packages.contains(getContext().getPackageName());
+            JSObject ret = new JSObject();
+            ret.put("granted", granted);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Could not check notification access: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void openNotificationAccessSettings(PluginCall call) {
+        try {
+            Intent intent = new Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Could not open notification access settings: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void dismissNotification(PluginCall call) {
+        String id = call.getString("id");
+        try {
+            if (TuiNotificationListener.getInstance() != null && id != null) {
+                TuiNotificationListener.getInstance().dismissNotification(id);
+            }
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            call.resolve(ret);
+        } catch (Exception e) {
+            call.reject("Could not dismiss notification: " + e.getMessage());
         }
     }
 }

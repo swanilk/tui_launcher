@@ -97,10 +97,22 @@ export const AppsTab: React.FC<AppsTabProps> = ({
 
   // Recently used apps
   const recentApps = useMemo(() => {
-    return [...apps]
+    const seen = new Set<string>();
+    const eligible = [...apps]
       .filter((a) => (a.lastUsed && a.lastUsed > 0) || a.favorite)
-      .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0))
-      .slice(0, 4);
+      .sort((a, b) => (b.lastUsed || 0) - (a.lastUsed || 0));
+
+    const result: AndroidApp[] = [];
+    for (const app of eligible) {
+      const pkg = (app.packageName || '').toLowerCase().trim();
+      const id = (app.id || '').toLowerCase().trim();
+      const key = pkg ? `pkg:${pkg}` : (id ? `id:${id}` : `name:${app.name.toLowerCase().trim()}`);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(app);
+      if (result.length >= 4) break;
+    }
+    return result;
   }, [apps]);
 
   // Filtered apps
@@ -124,7 +136,28 @@ export const AppsTab: React.FC<AppsTabProps> = ({
       );
     }
 
-    return list;
+    // Deduplicate apps to guarantee NO duplicate app cards ever show up
+    const seen = new Set<string>();
+    return list.filter((app) => {
+      const pkg = (app.packageName || '').toLowerCase().trim();
+      const id = (app.id || '').toLowerCase().trim();
+      const name = (app.name || '').toLowerCase().trim();
+
+      // Check package name uniqueness (highest priority on Android)
+      if (pkg && seen.has(`pkg:${pkg}`)) return false;
+      // Check ID uniqueness
+      if (id && seen.has(`id:${id}`)) return false;
+      // Check exact Name + Package
+      if (name && pkg && seen.has(`np:${name}:::${pkg}`)) return false;
+      // Check exact Name if package is absent or matching
+      if (name && seen.has(`name:${name}`) && (!pkg || seen.has(`pkg:${pkg}`))) return false;
+
+      if (pkg) seen.add(`pkg:${pkg}`);
+      if (id) seen.add(`id:${id}`);
+      if (name) seen.add(`name:${name}`);
+      if (name && pkg) seen.add(`np:${name}:::${pkg}`);
+      return true;
+    });
   }, [apps, selectedCategory, searchQuery]);
 
   const handleLaunch = (app: AndroidApp) => {

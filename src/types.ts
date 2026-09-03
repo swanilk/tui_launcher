@@ -37,6 +37,8 @@ export interface AppNotification {
   actionCommand?: string;
   actionLabel?: string;
   read?: boolean;
+  category?: 'whatsapp' | 'sms' | 'call' | 'general';
+  sender?: string;
 }
 
 export interface TerminalLine {

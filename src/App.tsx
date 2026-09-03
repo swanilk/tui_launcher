@@ -52,8 +52,18 @@ import { DefaultLauncherModal } from './components/DefaultLauncherModal';
 import { MatrixScreen } from './components/MatrixScreen';
 import { ActiveCallOverlay } from './components/ActiveCallOverlay';
 import { CommandParser, CommandContext } from './utils/commandParser';
+import { virtualFS } from './utils/fileSystem';
 import { soundManager } from './utils/audio';
-import { getNativeInstalledApps, launchNativeAndroidApp, isNativeAndroidApp } from './utils/nativeLauncher';
+import { 
+  getNativeInstalledApps, 
+  launchNativeAndroidApp, 
+  isNativeAndroidApp,
+  getNativeActiveNotifications,
+  isNativeNotificationAccessGranted,
+  openNativeNotificationAccessSettings,
+  dismissNativeNotification,
+  subscribeToNativeNotifications
+} from './utils/nativeLauncher';
 
 export default function App() {
   // Active Main Tab: 'apps' | 'notifs' | 'term'
@@ -91,11 +101,27 @@ export default function App() {
     } catch {}
   }, [history]);
 
+  function deduplicateApps(appList: AndroidApp[]): AndroidApp[] {
+  const seen = new Set<string>();
+  const result: AndroidApp[] = [];
+  for (const app of appList) {
+    const pkg = (app.packageName || '').toLowerCase().trim();
+    const id = (app.id || '').toLowerCase().trim();
+    const name = (app.name || '').toLowerCase().trim();
+    const key = pkg ? `pkg:${pkg}` : (id ? `id:${id}` : `name:${name}`);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(app);
+  }
+  return result;
+}
+
   // 3. Persistent Apps
   const [apps, setApps] = useState<AndroidApp[]>(() => {
     try {
       const stored = localStorage.getItem('android_tui_apps');
-      return stored ? JSON.parse(stored) : DEFAULT_APPS;
+      const list = stored ? JSON.parse(stored) : DEFAULT_APPS;
+      return deduplicateApps(Array.isArray(list) ? list : DEFAULT_APPS);
     } catch {
       return DEFAULT_APPS;
     }
@@ -117,10 +143,11 @@ export default function App() {
       if (nativeApps && nativeApps.length > 0) {
         setApps((prev) => {
           const favoritePkgs = new Set(prev.filter((a) => a.favorite).map((a) => a.packageName));
-          return nativeApps.map((na) => ({
+          const merged = nativeApps.map((na) => ({
             ...na,
             favorite: favoritePkgs.has(na.packageName),
           }));
+          return deduplicateApps(merged);
         });
         setLines((prev) => [
           ...prev,
@@ -176,6 +203,53 @@ export default function App() {
       localStorage.setItem('android_tui_notifications', JSON.stringify(notifications));
     } catch {}
   }, [notifications]);
+
+  const [isNotificationAccessGranted, setIsNotificationAccessGranted] = useState(true);
+  const [isSyncingNotifications, setIsSyncingNotifications] = useState(false);
+
+  // Synchronize notifications from native Android NotificationListenerService
+  const handleSyncNotifications = useCallback(async () => {
+    setIsSyncingNotifications(true);
+    try {
+      if (isNativeAndroidApp()) {
+        const granted = await isNativeNotificationAccessGranted();
+        setIsNotificationAccessGranted(granted);
+
+        const nativeNotifs = await getNativeActiveNotifications();
+        if (nativeNotifs && nativeNotifs.length > 0) {
+          setNotifications((prev) => {
+            const incomingIds = new Set(nativeNotifs.map((n) => n.id));
+            const retained = prev.filter((n) => !incomingIds.has(n.id));
+            return [...nativeNotifs, ...retained];
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('handleSyncNotifications error:', err);
+    } finally {
+      setIsSyncingNotifications(false);
+    }
+  }, []);
+
+  // Real-time Android notification listener subscription
+  useEffect(() => {
+    if (isNativeAndroidApp()) {
+      handleSyncNotifications();
+
+      const unsubscribe = subscribeToNativeNotifications(
+        (newNotif) => {
+          setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
+        },
+        (removedId) => {
+          setNotifications((prev) => prev.filter((n) => n.id !== removedId));
+        }
+      );
+
+      return () => {
+        unsubscribe();
+      };
+    }
+  }, [handleSyncNotifications]);
 
   // 4. Persistent Aliases
   const [aliases, setAliases] = useState<Alias[]>(() => {
@@ -541,7 +615,7 @@ Press [Tab] anytime for auto-completion.`,
       });
 
       // Prompt line entry
-      const promptStr = `${config.promptUser}@${config.promptHost}:${config.promptSymbol}`;
+      const promptStr = `${config.promptUser}@${config.promptHost}:${virtualFS.getDisplayPwd()}${config.promptSymbol}`;
       const inputLineId = `line-input-${Date.now()}`;
 
       setLines((prev) => [
@@ -764,6 +838,7 @@ Press [Tab] anytime for auto-completion.`,
             theme={currentTheme}
             notifications={notifications}
             onDismissNotification={(id) => {
+              dismissNativeNotification(id);
               setNotifications((prev) => prev.filter((n) => n.id !== id));
             }}
             onClearAllNotifications={() => {
@@ -776,6 +851,10 @@ Press [Tab] anytime for auto-completion.`,
             onOpenApp={handleLaunchApp}
             apps={apps}
             soundEnabled={config.soundEnabled}
+            onSyncNotifications={handleSyncNotifications}
+            isSyncing={isSyncingNotifications}
+            isAccessGranted={isNotificationAccessGranted}
+            onOpenAccessSettings={openNativeNotificationAccessSettings}
           />
         )}
 

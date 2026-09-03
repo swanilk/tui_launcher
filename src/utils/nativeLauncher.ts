@@ -4,7 +4,7 @@
  */
 
 import { registerPlugin, Capacitor } from '@capacitor/core';
-import { AndroidApp } from '../types';
+import { AndroidApp, AppNotification } from '../types';
 
 export interface NativeInstalledApp {
   id: string;
@@ -39,12 +39,21 @@ export interface AppLauncherPluginInterface {
   openAppSettings(options?: { packageName?: string }): Promise<{ success: boolean }>;
   uninstallApp(options: { packageName: string }): Promise<{ success: boolean; packageName?: string }>;
   listStorageFiles(options?: { path?: string }): Promise<{ success: boolean; absolutePath: string; files: NativeStorageFile[]; count: number }>;
+  checkDirectory?(options?: { path?: string }): Promise<{ success: boolean; exists: boolean; isDirectory: boolean; absolutePath?: string; error?: string }>;
+  readStorageFile?(options?: { path?: string }): Promise<{ success: boolean; content: string; size?: number; absolutePath?: string }>;
+  writeStorageFile?(options?: { path?: string; content?: string; append?: boolean }): Promise<{ success: boolean; absolutePath?: string; size?: number }>;
   setBluetoothEnabled(options: { enabled: boolean }): Promise<{ success: boolean; state?: string }>;
   scanBluetooth(): Promise<{ success: boolean; devices: NativeBluetoothDevice[]; count: number }>;
   openBluetoothSettings(): Promise<{ success: boolean }>;
   connectBluetooth(options?: { address?: string; name?: string }): Promise<{ success: boolean }>;
   openHotspotSettings(): Promise<{ success: boolean; action?: string }>;
   dialPhoneNumber(options?: { phoneNumber?: string }): Promise<{ success: boolean; phoneNumber?: string; fallback?: boolean }>;
+  getActiveNotifications?(): Promise<{ success: boolean; notifications: AppNotification[]; count: number }>;
+  isNotificationAccessGranted?(): Promise<{ granted: boolean }>;
+  openNotificationAccessSettings?(): Promise<{ success: boolean }>;
+  dismissNotification?(options: { id: string }): Promise<{ success: boolean }>;
+  addListener?(eventName: 'notificationPosted', listenerFunc: (notification: AppNotification) => void): Promise<any>;
+  addListener?(eventName: 'notificationRemoved', listenerFunc: (data: { id: string }) => void): Promise<any>;
 }
 
 export const AppLauncher = registerPlugin<AppLauncherPluginInterface>('AppLauncher');
@@ -112,14 +121,24 @@ export async function getNativeInstalledApps(): Promise<AndroidApp[] | null> {
   try {
     const result = await AppLauncher.getInstalledApps();
     if (result && Array.isArray(result.apps) && result.apps.length > 0) {
-      return result.apps.map((a) => ({
-        id: a.packageName,
-        name: a.name,
-        packageName: a.packageName,
-        category: a.category || 'tools',
-        icon: a.isSystem ? 'Settings' : 'Package',
-        description: `Installed on device (${a.packageName})`,
-      }));
+      const seen = new Set<string>();
+      const deduped: AndroidApp[] = [];
+      for (const a of result.apps) {
+        const pkg = (a.packageName || a.id || '').toLowerCase().trim();
+        const name = (a.name || '').toLowerCase().trim();
+        const key = pkg || name;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        deduped.push({
+          id: a.packageName || a.id,
+          name: a.name,
+          packageName: a.packageName,
+          category: a.category || 'tools',
+          icon: a.isSystem ? 'Settings' : 'Package',
+          description: `Installed on device (${a.packageName})`,
+        });
+      }
+      return deduped;
     }
   } catch (err) {
     console.warn('Could not query native apps via AppLauncher plugin:', err);
@@ -305,6 +324,95 @@ export async function getNativeStorageFiles(
     console.warn('Native listStorageFiles error:', err);
   }
   return null;
+}
+
+/**
+ * Check if a directory exists and is a directory on native Android storage
+ */
+export async function checkNativeDirectory(
+  pathStr: string
+): Promise<{ success: boolean; exists: boolean; isDirectory: boolean; absolutePath?: string; error?: string }> {
+  if (!isNativeAndroidApp()) {
+    return { success: false, exists: false, isDirectory: false, error: 'Not native Android' };
+  }
+
+  try {
+    if (typeof AppLauncher.checkDirectory === 'function') {
+      const res = await AppLauncher.checkDirectory({ path: pathStr });
+      if (res && res.success !== undefined) {
+        return res;
+      }
+    }
+  } catch (err: any) {
+    console.debug('checkDirectory method unavailable or failed, falling back to listStorageFiles:', err);
+  }
+
+  // Fallback using listStorageFiles which exists in currently compiled APK
+  try {
+    const res = await AppLauncher.listStorageFiles({ path: pathStr });
+    if (res && res.success) {
+      return {
+        success: true,
+        exists: true,
+        isDirectory: true,
+        absolutePath: res.absolutePath,
+      };
+    }
+  } catch (err: any) {
+    const msg = err?.message || String(err);
+    if (msg.includes('Not a directory')) {
+      return { success: false, exists: true, isDirectory: false, error: 'Not a directory' };
+    }
+    return { success: false, exists: false, isDirectory: false, error: 'No such file or directory' };
+  }
+
+  return { success: false, exists: false, isDirectory: false, error: 'No such file or directory' };
+}
+
+/**
+ * Read text content of a file from native Android storage
+ */
+export async function readNativeStorageFile(
+  pathStr: string
+): Promise<{ success: boolean; content?: string; error?: string }> {
+  if (!isNativeAndroidApp()) {
+    return { success: false, error: 'Not native Android' };
+  }
+  try {
+    if (typeof AppLauncher.readStorageFile === 'function') {
+      const res = await AppLauncher.readStorageFile({ path: pathStr });
+      if (res && res.success) {
+        return { success: true, content: res.content };
+      }
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+  return { success: false, error: 'Native file read not supported on this build' };
+}
+
+/**
+ * Write text content to a file in native Android storage
+ */
+export async function writeNativeStorageFile(
+  pathStr: string,
+  content: string,
+  append: boolean = false
+): Promise<{ success: boolean; error?: string }> {
+  if (!isNativeAndroidApp()) {
+    return { success: false, error: 'Not native Android' };
+  }
+  try {
+    if (typeof AppLauncher.writeStorageFile === 'function') {
+      const res = await AppLauncher.writeStorageFile({ path: pathStr, content, append });
+      if (res && res.success) {
+        return { success: true };
+      }
+    }
+  } catch (err: any) {
+    return { success: false, error: err?.message || String(err) };
+  }
+  return { success: false, error: 'Native file write not supported on this build' };
 }
 
 /**
@@ -557,4 +665,115 @@ export async function dialNativePhoneNumber(phoneNumber?: string): Promise<{
     message: cleanPhone ? `Call initiated to ${cleanPhone}` : 'Android dialer requested',
   };
 }
+
+/**
+ * Fetch all active notifications from Android's NotificationListenerService
+ */
+export async function getNativeActiveNotifications(): Promise<AppNotification[] | null> {
+  if (!isNativeAndroidApp()) {
+    return null;
+  }
+  try {
+    if (AppLauncher.getActiveNotifications) {
+      const res = await AppLauncher.getActiveNotifications();
+      if (res && res.success && Array.isArray(res.notifications)) {
+        return res.notifications;
+      }
+    }
+  } catch (err) {
+    console.warn('getNativeActiveNotifications error:', err);
+  }
+  return null;
+}
+
+/**
+ * Check if Android Notification Access permission is granted
+ */
+export async function isNativeNotificationAccessGranted(): Promise<boolean> {
+  if (!isNativeAndroidApp()) {
+    return false;
+  }
+  try {
+    if (AppLauncher.isNotificationAccessGranted) {
+      const res = await AppLauncher.isNotificationAccessGranted();
+      return !!res?.granted;
+    }
+  } catch (err) {
+    console.warn('isNativeNotificationAccessGranted error:', err);
+  }
+  return false;
+}
+
+/**
+ * Open Android Settings to grant Notification Listener access
+ */
+export async function openNativeNotificationAccessSettings(): Promise<boolean> {
+  if (isNativeAndroidApp()) {
+    try {
+      if (AppLauncher.openNotificationAccessSettings) {
+        const res = await AppLauncher.openNotificationAccessSettings();
+        return !!res?.success;
+      }
+    } catch (err) {
+      console.warn('openNativeNotificationAccessSettings error:', err);
+    }
+  }
+
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    try {
+      window.location.href = 'intent:#Intent;action=android.settings.ACTION_NOTIFICATION_LISTENER_SETTINGS;end';
+      return true;
+    } catch {}
+  }
+  return false;
+}
+
+/**
+ * Dismiss a notification on Android device
+ */
+export async function dismissNativeNotification(id: string): Promise<boolean> {
+  if (isNativeAndroidApp() && AppLauncher.dismissNotification) {
+    try {
+      const res = await AppLauncher.dismissNotification({ id });
+      return !!res?.success;
+    } catch (err) {
+      console.warn('dismissNativeNotification error:', err);
+    }
+  }
+  return false;
+}
+
+/**
+ * Subscribe to real-time incoming notification events from Android NotificationListenerService
+ */
+export function subscribeToNativeNotifications(
+  onPosted: (notif: AppNotification) => void,
+  onRemoved: (id: string) => void
+): () => void {
+  if (!isNativeAndroidApp() || !AppLauncher.addListener) {
+    return () => {};
+  }
+
+  let subPosted: any = null;
+  let subRemoved: any = null;
+
+  AppLauncher.addListener('notificationPosted', (notif: AppNotification) => {
+    if (notif) onPosted(notif);
+  }).then((handle) => {
+    subPosted = handle;
+  }).catch(() => {});
+
+  AppLauncher.addListener('notificationRemoved', (data: { id: string }) => {
+    if (data && data.id) onRemoved(data.id);
+  }).then((handle) => {
+    subRemoved = handle;
+  }).catch(() => {});
+
+  return () => {
+    if (subPosted && typeof subPosted.remove === 'function') subPosted.remove();
+    if (subRemoved && typeof subRemoved.remove === 'function') subRemoved.remove();
+  };
+}
+
 

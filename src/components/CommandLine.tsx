@@ -96,6 +96,15 @@ export const CommandLine: React.FC<CommandLineProps> = ({
   const [selectedSuggestionIdx, setSelectedSuggestionIdx] = useState<number>(0);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [cursorPosition, setCursorPosition] = useState<number>(0);
+  const [currentDisplayPath, setCurrentDisplayPath] = useState(virtualFS.getDisplayPwd());
+
+  useEffect(() => {
+    setCurrentDisplayPath(virtualFS.getDisplayPwd());
+    const unsubscribe = virtualFS.subscribe((_path, displayPath) => {
+      setCurrentDisplayPath(displayPath);
+    });
+    return unsubscribe;
+  }, []);
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -143,7 +152,15 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           )
         : apps;
 
-      const items: SuggestionItem[] = matchedApps.slice(0, 8).map((a) => ({
+      const seen = new Set<string>();
+      const dedupedApps = matchedApps.filter((a) => {
+        const key = (a.packageName || a.id || a.name).toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const items: SuggestionItem[] = dedupedApps.slice(0, 8).map((a) => ({
         id: `app-open-${a.id}`,
         type: 'app',
         label: a.name,
@@ -185,7 +202,15 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           )
         : apps;
 
-      const items: SuggestionItem[] = matchedApps.slice(0, 8).map((a) => ({
+      const seen = new Set<string>();
+      const dedupedApps = matchedApps.filter((a) => {
+        const key = (a.packageName || a.id || a.name).toLowerCase().trim();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      const items: SuggestionItem[] = dedupedApps.slice(0, 8).map((a) => ({
         id: `app-uninstall-${a.id}`,
         type: 'uninstall',
         label: a.name,
@@ -676,7 +701,21 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     } else {
       // Autocompleting arguments, files, or subcommands
       const prevWord = words[words.length - 2].toLowerCase();
-      if (['cat', 'nano', 'vim', 'edit', 'run', 'rm', 'ls'].includes(prevWord)) {
+      if (prevWord === 'cd') {
+        const fsDirs = (virtualFS.listDir('.').files || [])
+          .filter((f) => f.type === 'dir')
+          .map((f) => `${f.name}/`)
+          .filter((f) => f.toLowerCase().startsWith(lastWord.toLowerCase()) && f !== lastWord)
+          .map((f) => ({
+            id: `dir-${f}`,
+            type: 'file' as const,
+            label: `📁 ${f}`,
+            value: f,
+            fullReplacement: `cd ${f}`,
+          }));
+        setSuggestions(fsDirs);
+        setShowSuggestions(fsDirs.length > 0);
+      } else if (['cat', 'nano', 'vim', 'edit', 'run', 'rm', 'ls'].includes(prevWord)) {
         const fsFiles = (virtualFS.listDir('.').files || [])
           .map((f) => (f.type === 'dir' ? `${f.name}/` : f.name))
           .filter((f) => f.toLowerCase().startsWith(lastWord.toLowerCase()) && f !== lastWord)
@@ -924,7 +963,6 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     }
   };
 
-  const currentDisplayPath = virtualFS.getDisplayPwd();
   const isCallActive = input.trimStart().toLowerCase().startsWith('call') || input.trimStart().toLowerCase().startsWith('dial');
   const isOpenActive = input.trimStart().toLowerCase().startsWith('open') || input.trimStart().toLowerCase().startsWith('launch');
   const isUninstallActive = input.trimStart().toLowerCase().startsWith('uninstall') || input.trimStart().toLowerCase().startsWith('remove-app');
@@ -1198,7 +1236,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         {/* Android Prompt Prefix: ~/directory ❯ */}
         <div className="flex items-center gap-1.5 shrink-0 font-bold select-none text-xs md:text-sm">
           <span style={{ color: theme.promptColor }}>
-            {currentDisplayPath.startsWith('~') ? currentDisplayPath : `~/${currentDisplayPath}`}
+            {currentDisplayPath}
           </span>
           <span className="text-white">❯</span>
         </div>

@@ -5,14 +5,23 @@
 
 import { VirtualFile } from '../types';
 import { INITIAL_FILESYSTEM } from '../data/defaultData';
+import {
+  isNativeAndroidApp,
+  getNativeStorageFiles,
+  checkNativeDirectory,
+  readNativeStorageFile,
+  writeNativeStorageFile,
+} from './nativeLauncher';
 
 const FS_STORAGE_KEY = 'android_storage_system_v3';
 
 export class VirtualFS {
   private root: VirtualFile[];
   private currentPath: string = '/storage/emulated/0';
+  private previousPath: string = '/storage/emulated/0';
   private mountedDirectoryHandle: any = null;
   private mountedDirName: string = '';
+  private listeners: Set<(path: string, displayPath: string) => void> = new Set();
 
   constructor() {
     // Clear legacy simulated filesystem cache
@@ -23,6 +32,85 @@ export class VirtualFS {
     } catch {}
 
     this.root = this.loadFileSystem();
+
+    // Auto-cache native Android files in background if running as mobile APK
+    if (typeof window !== 'undefined') {
+      setTimeout(() => {
+        if (isNativeAndroidApp()) {
+          getNativeStorageFiles('/storage/emulated/0')
+            .then((res) => {
+              if (res && res.files && res.files.length > 0) {
+                this.cacheNativeFiles('/storage/emulated/0', res.files);
+              }
+            })
+            .catch(() => {});
+        }
+      }, 500);
+    }
+  }
+
+  public subscribe(listener: (path: string, displayPath: string) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(): void {
+    const pwd = this.getPwd();
+    const displayPwd = this.getDisplayPwd();
+    this.listeners.forEach((l) => {
+      try {
+        l(pwd, displayPwd);
+      } catch (err) {
+        console.error('VirtualFS listener error:', err);
+      }
+    });
+  }
+
+  public cacheNativeFiles(
+    dirPath: string,
+    files: Array<{ name: string; isDirectory: boolean; size: number; lastModified?: number }>
+  ): void {
+    const resolved = this.resolvePath(dirPath);
+    const parts = resolved.split('/').filter(Boolean);
+
+    let currentChildren = this.root;
+    let currentNode: VirtualFile | null = null;
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      let found = currentChildren.find((c) => c.name.toLowerCase() === part.toLowerCase());
+      if (!found) {
+        found = {
+          name: part,
+          type: 'dir',
+          updatedAt: Date.now(),
+          children: [],
+        };
+        currentChildren.push(found);
+      }
+      if (!found.children) {
+        found.children = [];
+      }
+      currentNode = found;
+      currentChildren = found.children;
+    }
+
+    if (currentNode) {
+      currentNode.children = files.map((f) => {
+        const existing = (currentNode!.children || []).find(
+          (c) => c.name.toLowerCase() === f.name.toLowerCase()
+        );
+        return {
+          name: f.name,
+          type: (f.isDirectory ? 'dir' : 'file') as 'dir' | 'file',
+          size: f.size || 0,
+          updatedAt: f.lastModified || Date.now(),
+          content: existing?.content,
+          children: existing?.children || (f.isDirectory ? [] : undefined),
+        };
+      });
+      this.saveFileSystem();
+    }
   }
 
   private loadFileSystem(): VirtualFile[] {
@@ -219,8 +307,61 @@ export class VirtualFS {
     return { success: true, files: node.children || [], resolvedPath: resolved };
   }
 
-  public changeDir(target: string): { success: boolean; error?: string } {
+  public async changeDir(target: string): Promise<{ success: boolean; error?: string; newPath?: string }> {
+    // 1. Home and aliases
+    if (!target || target === '~' || target === '~/storage' || target === 'storage' || target === '/sdcard') {
+      const resolved = '/storage/emulated/0';
+      this.previousPath = this.currentPath;
+      this.currentPath = resolved;
+      this.notify();
+      return { success: true, newPath: resolved };
+    }
+
+    // 2. Previous directory (cd -)
+    if (target === '-') {
+      const targetPath = this.previousPath || '/storage/emulated/0';
+      this.previousPath = this.currentPath;
+      this.currentPath = targetPath;
+      this.notify();
+      return { success: true, newPath: targetPath };
+    }
+
     const resolved = this.resolvePath(target);
+
+    // 3. Root and standard parent directories
+    if (resolved === '/' || resolved === '/storage' || resolved === '/storage/emulated' || resolved === '/storage/emulated/0') {
+      this.previousPath = this.currentPath;
+      this.currentPath = resolved;
+      this.notify();
+      return { success: true, newPath: resolved };
+    }
+
+    // 4. Native Android Storage check (running on mobile phone APK)
+    if (isNativeAndroidApp()) {
+      try {
+        const checkRes = await checkNativeDirectory(resolved);
+        if (checkRes.success && checkRes.isDirectory) {
+          this.previousPath = this.currentPath;
+          this.currentPath = resolved;
+          // Background populate child files cache so autocompletion has access to real entries
+          getNativeStorageFiles(resolved)
+            .then((res) => {
+              if (res && res.files) {
+                this.cacheNativeFiles(resolved, res.files);
+              }
+            })
+            .catch(() => {});
+          this.notify();
+          return { success: true, newPath: resolved };
+        } else if (checkRes.exists && !checkRes.isDirectory) {
+          return { success: false, error: `cd: not a directory: ${target}` };
+        }
+      } catch (err) {
+        console.warn('Native checkNativeDirectory fallback to virtual node:', err);
+      }
+    }
+
+    // 5. In-memory / SAF virtual tree check
     const node = this.getNode(resolved);
     if (!node) {
       return { success: false, error: `cd: ${target}: No such file or directory` };
@@ -228,8 +369,26 @@ export class VirtualFS {
     if (node.type !== 'dir') {
       return { success: false, error: `cd: not a directory: ${target}` };
     }
+
+    this.previousPath = this.currentPath;
     this.currentPath = resolved;
-    return { success: true };
+    this.notify();
+    return { success: true, newPath: resolved };
+  }
+
+  public async readStorageFile(pathStr: string): Promise<{ success: boolean; content?: string; error?: string }> {
+    const resolved = this.resolvePath(pathStr);
+    if (isNativeAndroidApp()) {
+      try {
+        const nativeRes = await readNativeStorageFile(resolved);
+        if (nativeRes.success && nativeRes.content !== undefined) {
+          return { success: true, content: nativeRes.content };
+        }
+      } catch (err) {
+        console.warn('Native readStorageFile fallback:', err);
+      }
+    }
+    return this.readFile(pathStr);
   }
 
   public readFile(pathStr: string): { success: boolean; content?: string; error?: string } {
@@ -281,7 +440,19 @@ export class VirtualFS {
     return { success: true };
   }
 
-  public async writeStorageFile(pathStr: string, content: string): Promise<{ success: boolean; error?: string }> {
+  public async writeStorageFile(pathStr: string, content: string, append = false): Promise<{ success: boolean; error?: string }> {
+    const resolved = this.resolvePath(pathStr);
+    if (isNativeAndroidApp()) {
+      try {
+        const nativeRes = await writeNativeStorageFile(resolved, content, append);
+        if (nativeRes.success) {
+          this.writeFile(pathStr, content, append);
+          return { success: true };
+        }
+      } catch (err) {
+        console.warn('Native writeStorageFile fallback:', err);
+      }
+    }
     if (this.mountedDirectoryHandle) {
       try {
         const fileHandle = await (this.mountedDirectoryHandle as any).getFileHandle(pathStr, { create: true });
@@ -292,7 +463,7 @@ export class VirtualFS {
         console.warn('SAF file write note:', err);
       }
     }
-    return this.writeFile(pathStr, content);
+    return this.writeFile(pathStr, content, append);
   }
 
   public makeDir(pathStr: string): { success: boolean; error?: string } {
@@ -351,7 +522,9 @@ export class VirtualFS {
   public resetFS(): void {
     this.root = JSON.parse(JSON.stringify(INITIAL_FILESYSTEM));
     this.currentPath = '/storage/emulated/0';
+    this.previousPath = '/storage/emulated/0';
     this.saveFileSystem();
+    this.notify();
   }
 }
 

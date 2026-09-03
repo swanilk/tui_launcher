@@ -1075,13 +1075,15 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
       case 'dir': {
         const showAll = args.includes('-a') || args.includes('-la') || args.includes('-al');
         const showLong = args.includes('-l') || args.includes('-la') || args.includes('-al');
-        const targetPath = args.find((a) => !a.startsWith('-')) || '.';
+        const rawTarget = args.find((a) => !a.startsWith('-')) || '.';
+        const targetPath = virtualFS.resolvePath(rawTarget);
 
         // 1. Native Android Storage interaction (when running inside Capacitor APK on phone)
         if (isNativeAndroidApp()) {
           try {
             const nativeRes = await getNativeStorageFiles(targetPath);
             if (nativeRes && nativeRes.success && nativeRes.files) {
+              virtualFS.cacheNativeFiles(targetPath, nativeRes.files);
               const items = nativeRes.files.filter((f) => showAll || !f.name.startsWith('.'));
               if (items.length === 0) {
                 return {
@@ -1216,9 +1218,12 @@ Commands:
 
       case 'cd': {
         const target = args[0] || '~';
-        const res = virtualFS.changeDir(target);
+        const res = await virtualFS.changeDir(target);
         if (!res.success) {
           return { type: 'error', content: res.error || 'cd error' };
+        }
+        if (target === '-') {
+          return { type: 'output', content: virtualFS.getPwd() };
         }
         return null; // silent on success like bash
       }
@@ -1226,14 +1231,14 @@ Commands:
       case 'cat':
       case 'read': {
         if (args.length === 0) return { type: 'error', content: 'Usage: cat <filename>' };
-        const res = virtualFS.readFile(args[0]);
+        const res = await virtualFS.readStorageFile(args[0]);
         if (!res.success) return { type: 'error', content: res.error || 'cat error' };
         return { type: 'output', content: res.content || '' };
       }
 
       case 'touch': {
         if (args.length === 0) return { type: 'error', content: 'Usage: touch <filename>' };
-        const res = virtualFS.writeFile(args[0], '', true);
+        const res = await virtualFS.writeStorageFile(args[0], '', true);
         if (!res.success) return { type: 'error', content: res.error || 'touch error' };
         return null;
       }
