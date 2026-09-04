@@ -718,8 +718,8 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
             </div>
           )}
 
-          {/* TAB 2: Native Android / ADB Command */}
-          {activeTab === 'android' && (
+          {/* TAB 3 (cont): Native Android / ADB Command & Manifest Snippet */}
+          {activeTab === 'adb' && (
             <div className="space-y-4">
               <div className="space-y-1">
                 <h3 className="font-bold text-sm" style={{ color: theme.promptColor }}>

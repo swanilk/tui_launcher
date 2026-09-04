@@ -307,7 +307,7 @@ Opening interactive launcher setup wizard...`,
         const enable = subCmd === 'off' || subCmd === 'disable' || subCmd === '3button' ? false : true;
         const result = await setNativeGestureNavigationMode(enable);
         return {
-          type: result.success ? 'success' : 'warning',
+          type: result.success ? 'success' : 'system',
           content: `👆 [GESTURE NAVIGATION CONTROLLER]
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Status: ${result.message}

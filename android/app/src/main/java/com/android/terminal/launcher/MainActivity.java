@@ -32,15 +32,24 @@ public class MainActivity extends BridgeActivity {
 
     private void setupImmersiveGestureMode() {
         try {
-            Window window = getWindow();
+            final Window window = getWindow();
+            if (window == null) return;
             WindowCompat.setDecorFitsSystemWindows(window, false);
             window.setNavigationBarColor(Color.TRANSPARENT);
 
-            WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-            if (controller != null) {
-                // Hide 3-button navigation bars and enforce transient swipe gestures
-                controller.hide(WindowInsetsCompat.Type.navigationBars());
-                controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+            if (window.getDecorView() != null) {
+                window.getDecorView().post(new Runnable() {
+                    @Override
+                    public void run() {
+                        try {
+                            WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+                            if (controller != null) {
+                                controller.hide(WindowInsetsCompat.Type.navigationBars());
+                                controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                            }
+                        } catch (Exception ignored) {}
+                    }
+                });
             }
         } catch (Exception ignored) {}
     }

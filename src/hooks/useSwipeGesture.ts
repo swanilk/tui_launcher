@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useRef } from 'react';
+import { useRef, type TouchEvent } from 'react';
 
 export interface SwipeGestureOptions {
   onSwipeLeft?: () => void;
@@ -25,7 +25,7 @@ export function useSwipeGesture({
   const startTime = useRef(0);
   const isTracking = useRef(false);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
+  const handleTouchStart = (e: TouchEvent) => {
     if (disabled || e.touches.length !== 1) return;
 
     const target = e.target as HTMLElement | null;
@@ -44,7 +44,7 @@ export function useSwipeGesture({
     isTracking.current = true;
   };
 
-  const handleTouchEnd = (e: React.TouchEvent) => {
+  const handleTouchEnd = (e: TouchEvent) => {
     if (!isTracking.current || disabled || !e.changedTouches || e.changedTouches.length === 0) {
       isTracking.current = false;
       return;

@@ -747,6 +747,14 @@ Press [Tab] anytime for auto-completion.`,
     fontFamily: `${config.fontFamily}, monospace`,
   };
 
+  const fontSizeClass = {
+    xs: 'text-xs',
+    sm: 'text-sm',
+    base: 'text-base',
+    lg: 'text-lg',
+    xl: 'text-xl',
+  }[config.fontSize] || 'text-sm';
+
   // Main tab order for horizontal swipe gestures: Apps <-> Notifs <-> Term
   const MAIN_TABS: MainTabType[] = ['apps', 'notifs', 'term'];
 
@@ -895,7 +903,7 @@ Press [Tab] anytime for auto-completion.`,
             apps={apps}
             onOpenApp={handleLaunchApp}
             onRunCommand={handleExecuteCommand}
-            onSyncApps={handleSyncNativeApps}
+            onSyncApps={() => { handleSyncNativeApps(); }}
             isSyncing={isSyncingApps}
             onToggleFavorite={(appId) => {
               setApps((prev) =>
@@ -1044,10 +1052,11 @@ Press [Tab] anytime for auto-completion.`,
       {/* Hardware Battery Telemetry & Diagnostics Modal */}
       {isBatteryModalOpen && (
         <BatteryMonitorModal
-          telemetry={batteryTelemetry}
+          batteryData={batteryTelemetry}
           theme={currentTheme}
           onClose={() => setIsBatteryModalOpen(false)}
           onTogglePowerSaver={() => setPowerSaver((p) => !p)}
+          onRunDiagnostic={() => {}}
           soundEnabled={config.soundEnabled}
         />
       )}
