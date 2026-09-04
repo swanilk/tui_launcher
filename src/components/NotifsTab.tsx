@@ -206,36 +206,6 @@ export const NotifsTab: React.FC<NotifsTabProps> = ({
         actionLabel: 'Open WhatsApp',
       },
       {
-        appName: 'Messages',
-        packageName: 'com.google.android.apps.messaging',
-        title: 'Bank Alert (SMS)',
-        message: 'OTP 819302 is your verification code. Do not share with anyone. Valid for 10 min.',
-        category: 'sms',
-        priority: 'high',
-        actionCommand: 'open Messages',
-        actionLabel: 'Open Messages',
-      },
-      {
-        appName: 'Phone',
-        packageName: 'com.google.android.dialer',
-        title: 'Alex Rivera',
-        message: 'Missed Call (2) • Mobile',
-        category: 'call',
-        priority: 'urgent',
-        actionCommand: 'call "Alex Rivera"',
-        actionLabel: 'Call Back',
-      },
-      {
-        appName: 'Phone',
-        packageName: 'com.google.android.dialer',
-        title: '+1 (555) 234-8901',
-        message: 'Incoming Call • Cellular Network',
-        category: 'call',
-        priority: 'urgent',
-        actionCommand: 'call "+1 (555) 234-8901"',
-        actionLabel: 'Call Back',
-      },
-      {
         appName: 'Battery Monitor',
         packageName: 'com.android.system.battery',
         title: 'Fast Charging Active',
@@ -244,6 +214,16 @@ export const NotifsTab: React.FC<NotifsTabProps> = ({
         priority: 'low',
         actionCommand: 'battery',
         actionLabel: 'View Battery',
+      },
+      {
+        appName: 'System',
+        packageName: 'com.android.systemui',
+        title: 'System Update Ready',
+        message: 'Android security patch and system performance enhancements ready to install.',
+        category: 'general',
+        priority: 'normal',
+        actionCommand: 'settings',
+        actionLabel: 'Settings',
       },
     ];
 
@@ -356,7 +336,7 @@ export const NotifsTab: React.FC<NotifsTabProps> = ({
               borderColor: theme.accentColor,
               color: theme.accentColor,
             }}
-            title="Simulate incoming WhatsApp, SMS, or Call notification"
+            title="Generate test notification"
           >
             <PlusCircle size={12} />
             <span className="hidden sm:inline">Simulate Push</span>

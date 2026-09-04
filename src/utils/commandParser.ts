@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, ActiveCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification, HotspotState } from '../types';
+import { AndroidApp, Alias, CustomScript, LauncherConfig, NoteItem, TodoItem, ContactItem, RecentCall, BluetoothDevice, BluetoothState, ActiveTimer, Theme, BatteryTelemetry, AppNotification, HotspotState } from '../types';
 import { virtualFS } from './fileSystem';
 import { soundManager } from './audio';
 import {
@@ -16,7 +16,9 @@ import {
   openNativeBluetoothSettings,
   openNativeHotspotSettings,
   dialNativePhoneNumber,
+  sendNativeSms,
   isNativeAndroidApp,
+  setNativeGestureNavigationMode,
 } from './nativeLauncher';
 
 export interface CommandContext {
@@ -41,8 +43,6 @@ export interface CommandContext {
   setContacts: (fn: (prev: ContactItem[]) => ContactItem[]) => void;
   recentCalls: RecentCall[];
   setRecentCalls: (fn: (prev: RecentCall[]) => RecentCall[]) => void;
-  activeCall?: ActiveCall | null;
-  setActiveCall?: (call: ActiveCall | null | ((prev: ActiveCall | null) => ActiveCall | null)) => void;
   bluetoothState: BluetoothState;
   setBluetoothState: (fn: (prev: BluetoothState) => BluetoothState) => void;
   hotspotState?: HotspotState;
@@ -232,7 +232,7 @@ export class CommandParser {
   • tab term     - Switch to Terminal Output Tab
 
 Current Active Tab: [ ${ctx.activeTab?.toUpperCase() || 'TERM'} ]
-Tip: You can press Ctrl+1 (Apps), Ctrl+2 (Notifs), Ctrl+3 (Term) or click the tab pills at the top.`,
+Tip: Swipe LEFT or RIGHT anywhere on screen, press Ctrl+1/2/3, or click the tab pills at the top.`,
           };
         }
 
@@ -276,6 +276,9 @@ Tip: You can press Ctrl+1 (Apps), Ctrl+2 (Notifs), Ctrl+3 (Term) or click the ta
         if (ctx.openDefaultLauncherModal) {
           ctx.openDefaultLauncherModal();
         }
+        // Proactively enforce gesture navigation mode
+        setNativeGestureNavigationMode(true).catch(() => {});
+
         return {
           type: 'success',
           content: `📱 [DEFAULT LAUNCHER SETUP]
@@ -283,13 +286,43 @@ Tip: You can press Ctrl+1 (Apps), Ctrl+2 (Notifs), Ctrl+3 (Term) or click the ta
 Android Terminal Launcher can be configured as your primary device Home App.
 
 Setup Options:
-  1. Add to Home Screen (PWA Standalone App)
-  2. Android Settings ➔ Apps ➔ Default apps ➔ Home app
-  3. ADB Shell Command:
-     adb shell cmd package set-home-activity com.android.tui.launcher/.MainActivity
-  4. Desktop: chrome://apps / edge://apps ➔ Run on Startup
+  1. Set as Default Android Home App (interactive role request)
+  2. Force Gesture Navigation Mode (auto-hides 3-button bar & requests system gesture nav)
+  3. ADB Shell Commands:
+     • Set Home: adb shell cmd package set-home-activity com.android.tui.launcher/.MainActivity
+     • Enable Gestures: adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
+  4. Swiping Gestures:
+     • Swipe LEFT ➔ Next Tab (Apps ➔ Notifs ➔ Term)
+     • Swipe RIGHT ➔ Previous Tab (Term ➔ Notifs ➔ Apps)
 
 Opening interactive launcher setup wizard...`,
+        };
+      }
+
+      // GESTURE NAVIGATION ENFORCEMENT & SETTINGS
+      case 'gesture-nav':
+      case 'gestures':
+      case 'gesture': {
+        const subCmd = args[0]?.toLowerCase();
+        const enable = subCmd === 'off' || subCmd === 'disable' || subCmd === '3button' ? false : true;
+        const result = await setNativeGestureNavigationMode(enable);
+        return {
+          type: result.success ? 'success' : 'warning',
+          content: `👆 [GESTURE NAVIGATION CONTROLLER]
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Status: ${result.message}
+Target Mode: ${enable ? 'Full Screen Gesture Navigation (3-Button Bar Hidden)' : 'Standard 3-Button Navigation'}
+
+Swiping Navigation:
+  • Swipe LEFT anywhere on screen ➔ Next section (Apps ➔ Notifs ➔ Term)
+  • Swipe RIGHT anywhere on screen ➔ Previous section (Term ➔ Notifs ➔ Apps)
+
+System Settings:
+  • To permanently switch system-wide navigation mode:
+    Android Settings ➔ System ➔ Gestures ➔ System navigation ➔ Gesture navigation.
+  • Or via ADB:
+    adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
+    adb shell settings put secure navigation_mode 2`,
         };
       }
 
@@ -512,9 +545,8 @@ Direct telephone keypad opened. Type 'call <number|name>' to place a direct call
             content: `📞 ANDROID PHONE CALL DIALER:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Usage:
-  • call <phone_number | contact_name>  - Initiate phone call
+  • call <phone_number | contact_name>  - Initiate phone call via Phone app
   • dial                                 - Open native Android phone dialer
-  • hangup                               - End active ongoing call
   • recents / calls                      - View call history
 
 🕒 RECENT CALLS:
@@ -557,38 +589,24 @@ Tip: Type 'call ' in prompt to view interactive autocomplete from your contacts 
           phone: targetPhone,
           timestamp: Date.now(),
           type: 'outgoing',
-          duration: 'Calling...',
+          duration: 'Outgoing Call',
         };
         ctx.setRecentCalls((prev) => [newLogEntry, ...prev.filter((r) => r.phone !== targetPhone)].slice(0, 30));
-
-        // Start active in-call overlay & telephony session
-        ctx.setActiveCall?.({
-          id: `call-${Date.now()}`,
-          name: targetName,
-          phone: targetPhone,
-          status: 'dialing',
-          startedAt: Date.now(),
-        });
-
-        // Play dialer DTMF tone
-        if (ctx.config.soundEnabled) {
-          soundManager.playDialTone(ctx.config.soundVolume);
-        }
 
         // Trigger native Android Phone Dialer Intent / Capacitor Plugin
         const dialRes = await dialNativePhoneNumber(cleanPhone);
 
         return {
           type: 'success',
-          content: `📞 INITIATING OUTGOING CALL:
+          content: `📞 PHONE CALL DISPATCHED:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Target:       ${targetName}
+  Contact:      ${targetName}
   Phone Number: ${targetPhone}
-  Telephony:    Android VoLTE / Radio Interface Layer
-  Status:       [● DIALING / ACTIVE]
-  Dispatch:     ${dialRes.message} (${dialRes.method})
+  Application:  Android Native Phone App
+  Status:       Dispatched (${dialRes.method})
+  Message:      ${dialRes.message}
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-In-call controller active. Type 'hangup' to end call or tap controls below.`,
+Handed off to your device's native Phone app to place the call.`,
           metadata: {
             action: 'call',
             name: targetName,
@@ -603,18 +621,10 @@ In-call controller active. Type 'hangup' to end call or tap controls below.`,
       case 'hangup':
       case 'endcall':
       case 'disconnect': {
-        if (!ctx.activeCall) {
-          return { type: 'output', content: '📞 No call is currently active to hang up.' };
-        }
-        const call = ctx.activeCall;
-        const dur = call.connectedAt ? `${Math.floor((Date.now() - call.connectedAt) / 1000)}s` : 'Cancelled';
-        ctx.setActiveCall?.(null);
-        if (ctx.config.soundEnabled) {
-          soundManager.playCallEnded(ctx.config.soundVolume);
-        }
         return {
-          type: 'success',
-          content: `[✓] Call ended with ${call.name} (${call.phone}). Duration: ${dur}`,
+          type: 'output',
+          content: `📞 Ongoing phone calls are handled directly by Android's native Phone app.
+Please use the active in-call banner or the Phone app to end the call.`,
         };
       }
 
@@ -646,14 +656,95 @@ Tip: Type 'call <name|number>' or 'call ' to redial any contact.`,
       }
 
       case 'sms':
-      case 'msg': {
-        if (args.length < 2) return { type: 'error', content: 'Usage: sms <contact_or_number> <message>' };
-        const recipient = args[0];
-        const msg = args.slice(1).join(' ');
-        return {
-          type: 'success',
-          content: `✉️ SMS dispatched to ${recipient}:\n"${msg}"\n[Delivered via SMS Gateway]`,
-        };
+      case 'msg':
+      case 'message':
+      case 'messages': {
+        // If no arguments provided, launch the phone's default messaging app
+        if (args.length === 0) {
+          const smsRes = await sendNativeSms();
+          return {
+            type: 'success',
+            content: `✉️ ANDROID MESSAGING APP DISPATCHED:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Action:      ${smsRes.message}
+  Method:      ${smsRes.method}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Default SMS/MMS messaging app opened.
+Usage:
+  • sms                          - Open phone's Messaging app
+  • sms <contact|number>         - Open conversation in Messaging app
+  • sms <contact|number> <msg>   - Compose and send SMS via Messaging app`,
+            metadata: { action: 'sms_app_open' },
+          };
+        }
+
+        const rawRecipient = args[0].replace(/^["']|["']$/g, '').trim();
+        const cleanQueryNum = rawRecipient.replace(/[^\d+]/g, '');
+
+        // Match contact by name or clean phone substring
+        const matchedContact = ctx.contacts.find((c) => {
+          const nameMatch = c.name.toLowerCase().includes(rawRecipient.toLowerCase());
+          const phoneClean = c.phone.replace(/[^\d+]/g, '');
+          const phoneMatch = cleanQueryNum.length >= 3 && phoneClean.includes(cleanQueryNum);
+          return nameMatch || phoneMatch;
+        }) || (ctx.recentCalls || []).find((rc) => {
+          const nameMatch = rc.name.toLowerCase().includes(rawRecipient.toLowerCase());
+          const phoneClean = rc.phone.replace(/[^\d+]/g, '');
+          const phoneMatch = cleanQueryNum.length >= 3 && phoneClean.includes(cleanQueryNum);
+          return nameMatch || phoneMatch;
+        });
+
+        const targetName = matchedContact ? matchedContact.name : rawRecipient;
+        const targetPhone = matchedContact ? matchedContact.phone : rawRecipient;
+        const cleanPhone = targetPhone.replace(/[^\d+*#]/g, '');
+
+        const messageText = args.slice(1).join(' ').trim();
+
+        // Dispatch native Android Messaging app
+        const smsRes = await sendNativeSms(cleanPhone, messageText);
+
+        if (messageText) {
+          return {
+            type: 'success',
+            content: `✉️ MESSAGING APP DISPATCHED (SMS):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Recipient:   ${targetName}
+  Phone:       ${targetPhone}
+  Message:     "${messageText}"
+  Status:      Dispatched to Phone's Messaging App
+  Dispatch:    ${smsRes.message} (${smsRes.method})
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Composed message handed off to your phone's Messaging app.`,
+            metadata: {
+              action: 'sms',
+              name: targetName,
+              phone: targetPhone,
+              cleanPhone,
+              message: messageText,
+              method: smsRes.method,
+            },
+          };
+        } else {
+          return {
+            type: 'success',
+            content: `✉️ OPENING CONVERSATION IN MESSAGING APP:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Recipient:   ${targetName}
+  Phone:       ${targetPhone}
+  Status:      Dispatched to Phone's Messaging App
+  Dispatch:    ${smsRes.message} (${smsRes.method})
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Conversation opened in your phone's Messaging app.`,
+            metadata: {
+              action: 'sms',
+              name: targetName,
+              phone: targetPhone,
+              cleanPhone,
+              message: '',
+              method: smsRes.method,
+            },
+          };
+        }
       }
 
       // 4. WEB SEARCH
@@ -1360,6 +1451,8 @@ Commands:
         recents: 'recents / calls\nView call logs history with timestamps and status (missed, incoming, outgoing).',
         launcher: 'set-default-launcher / launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app / home screen, install PWA, or configure ADB native home intent.',
         'set-default': 'set-default-launcher\nOpen the interactive wizard to set Android Terminal Launcher as your default home app.',
+        gestures: 'gesture-nav [on | off]\nEnforce immersive gesture navigation mode instead of 3-button navigation, hide navigation bar, and launch system gesture settings.',
+        'gesture-nav': 'gesture-nav [on | off]\nEnforce immersive gesture navigation mode instead of 3-button navigation.',
       };
 
       if (docs[topic]) {
@@ -1382,8 +1475,10 @@ Commands:
   uninstall <app>       Uninstall app package
   notifications / notifs Grouped tabular notifications shade
   set-default-launcher  Configure as default Android home launcher
-  call <num|name>       Android phone dialer
-  sms <num> <msg>       Send text message
+  gesture-nav           Enforce gesture navigation (hide 3-button bar)
+  tab <apps|notifs|term> Switch view tabs (or swipe left/right)
+  call <num|name>       Call via native Phone app
+  sms [num] [msg]       Send SMS via native Messaging app
   search / google <q>   Search Google, DuckDuckGo (ddg), or YouTube (yt)
 
 🎨 THEMES & CUSTOMIZATION:

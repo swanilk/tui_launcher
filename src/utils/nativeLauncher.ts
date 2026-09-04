@@ -48,6 +48,8 @@ export interface AppLauncherPluginInterface {
   connectBluetooth(options?: { address?: string; name?: string }): Promise<{ success: boolean }>;
   openHotspotSettings(): Promise<{ success: boolean; action?: string }>;
   dialPhoneNumber(options?: { phoneNumber?: string }): Promise<{ success: boolean; phoneNumber?: string; fallback?: boolean }>;
+  openSmsApp?(options?: { phoneNumber?: string; message?: string }): Promise<{ success: boolean; phoneNumber?: string; message?: string; fallback?: boolean }>;
+  setGestureNavigationMode?(options?: { enable?: boolean }): Promise<{ success: boolean; appliedDirectly?: boolean; settingsOpened?: boolean; message?: string }>;
   getActiveNotifications?(): Promise<{ success: boolean; notifications: AppNotification[]; count: number }>;
   isNotificationAccessGranted?(): Promise<{ granted: boolean }>;
   openNotificationAccessSettings?(): Promise<{ success: boolean }>;
@@ -148,8 +150,12 @@ export async function getNativeInstalledApps(): Promise<AndroidApp[] | null> {
 
 /**
  * Opens the native Android Home App Settings so the user can set this launcher as default.
+ * Also enforces gesture navigation mode instead of 3-button navigation.
  */
 export async function openAndroidHomeSettings(): Promise<boolean> {
+  // Proactively enforce gesture navigation mode
+  setNativeGestureNavigationMode(true).catch(() => {});
+
   if (isNativeAndroidApp()) {
     try {
       await AppLauncher.openHomeSettings();
@@ -166,6 +172,51 @@ export async function openAndroidHomeSettings(): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/**
+ * Force gesture navigation mode instead of 3-button navigation.
+ * Tries direct programmatic switch via Settings.Secure and dispatches Android System Navigation Settings.
+ */
+export async function setNativeGestureNavigationMode(enable: boolean = true): Promise<{
+  success: boolean;
+  appliedDirectly: boolean;
+  message: string;
+}> {
+  if (isNativeAndroidApp() && AppLauncher.setGestureNavigationMode) {
+    try {
+      const res = await AppLauncher.setGestureNavigationMode({ enable });
+      if (res) {
+        return {
+          success: res.success,
+          appliedDirectly: !!res.appliedDirectly,
+          message: res.message || (enable ? 'Gesture navigation enabled' : '3-button navigation restored'),
+        };
+      }
+    } catch (err) {
+      console.warn('Native setGestureNavigationMode failed:', err);
+    }
+  }
+
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    try {
+      window.location.href = 'intent:#Intent;action=android.settings.SYSTEM_NAVIGATION_SETTINGS;end';
+      return {
+        success: true,
+        appliedDirectly: false,
+        message: 'Opened Android system navigation settings',
+      };
+    } catch (e) {
+      console.warn('Browser navigation settings intent failed:', e);
+    }
+  }
+
+  return {
+    success: true,
+    appliedDirectly: false,
+    message: 'Gesture navigation settings requested',
+  };
 }
 
 /**
@@ -638,9 +689,9 @@ export async function dialNativePhoneNumber(phoneNumber?: string): Promise<{
   }
 
   // 3. Web browser / desktop environment fallback
-  if (cleanPhone && typeof window !== 'undefined') {
+  if (typeof window !== 'undefined') {
     try {
-      const telUri = `tel:${cleanPhone}`;
+      const telUri = cleanPhone ? `tel:${cleanPhone}` : 'tel:';
       const link = document.createElement('a');
       link.href = telUri;
       link.rel = 'noopener';
@@ -652,7 +703,7 @@ export async function dialNativePhoneNumber(phoneNumber?: string): Promise<{
       return {
         success: true,
         method: 'tel_protocol',
-        message: `Dispatched system telephony handler (tel:${cleanPhone})`,
+        message: cleanPhone ? `Dispatched system telephony handler (tel:${cleanPhone})` : 'Dispatched system phone dialer',
       };
     } catch (err) {
       console.warn('tel protocol link click error:', err);
@@ -661,8 +712,108 @@ export async function dialNativePhoneNumber(phoneNumber?: string): Promise<{
 
   return {
     success: true,
-    method: 'simulated_telephony',
-    message: cleanPhone ? `Call initiated to ${cleanPhone}` : 'Android dialer requested',
+    method: 'phone_app',
+    message: cleanPhone ? `Dispatched Phone app for ${cleanPhone}` : 'Opened Phone app dialer',
+  };
+}
+
+/**
+ * Open native Android Messaging app or compose SMS to specified recipient
+ */
+export async function sendNativeSms(
+  phoneNumber?: string,
+  message?: string
+): Promise<{
+  success: boolean;
+  message: string;
+  method: string;
+}> {
+  const cleanPhone = phoneNumber ? phoneNumber.replace(/[^\d+*#]/g, '') : '';
+  const bodyText = message ? message.trim() : '';
+
+  // 1. Native Capacitor Android App (most direct)
+  if (isNativeAndroidApp() && AppLauncher.openSmsApp) {
+    try {
+      const res = await AppLauncher.openSmsApp({
+        phoneNumber: cleanPhone,
+        message: bodyText,
+      });
+      if (res && res.success) {
+        return {
+          success: true,
+          method: 'native_plugin',
+          message: cleanPhone
+            ? `Dispatched native Android messaging app for ${cleanPhone}`
+            : 'Opened native Android messaging app',
+        };
+      }
+    } catch (err: any) {
+      console.warn('Native openSmsApp error:', err);
+    }
+  }
+
+  // 2. Android browser (Chrome/Samsung Internet) -> dispatch ACTION_SENDTO / ACTION_MAIN intent
+  const isAndroid = typeof navigator !== 'undefined' && /android/i.test(navigator.userAgent);
+  if (isAndroid) {
+    try {
+      let intentUrl = '';
+      if (cleanPhone) {
+        intentUrl = bodyText
+          ? `intent:#Intent;action=android.intent.action.SENDTO;data=smsto:${encodeURIComponent(cleanPhone)};S.sms_body=${encodeURIComponent(bodyText)};end`
+          : `intent:#Intent;action=android.intent.action.SENDTO;data=smsto:${encodeURIComponent(cleanPhone)};end`;
+      } else {
+        intentUrl = 'intent:#Intent;action=android.intent.action.MAIN;category=android.intent.category.APP_MESSAGING;end';
+      }
+      window.location.href = intentUrl;
+      return {
+        success: true,
+        method: 'android_intent',
+        message: cleanPhone
+          ? `Dispatched Android SMS intent for ${cleanPhone}`
+          : 'Dispatched Android messaging app intent',
+      };
+    } catch (err) {
+      console.warn('Browser SMS intent error:', err);
+    }
+  }
+
+  // 3. Web browser / desktop environment fallback via sms: protocol link
+  if (typeof window !== 'undefined') {
+    try {
+      let smsUri = 'sms:';
+      if (cleanPhone) {
+        smsUri = `sms:${cleanPhone}`;
+        if (bodyText) {
+          smsUri += `?body=${encodeURIComponent(bodyText)}`;
+        }
+      } else if (bodyText) {
+        smsUri = `sms:?body=${encodeURIComponent(bodyText)}`;
+      }
+
+      const link = document.createElement('a');
+      link.href = smsUri;
+      link.rel = 'noopener';
+      document.body.appendChild(link);
+      link.click();
+      setTimeout(() => {
+        if (document.body.contains(link)) document.body.removeChild(link);
+      }, 300);
+      return {
+        success: true,
+        method: 'sms_protocol',
+        message: cleanPhone
+          ? `Dispatched system messaging handler (sms:${cleanPhone})`
+          : 'Dispatched system messaging app',
+      };
+    } catch (err) {
+      console.warn('sms protocol link click error:', err);
+    }
+  }
+
+  return {
+    success: true,
+    method: 'messaging_app',
+    message: cleanPhone ? `Opened messaging app for ${cleanPhone}` : 'Opened messaging app',
   };
 }
 

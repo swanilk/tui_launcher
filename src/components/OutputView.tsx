@@ -24,9 +24,10 @@ import {
   Clock,
   ExternalLink,
   ChevronRight,
-  Zap
+  Zap,
+  Send
 } from 'lucide-react';
-import { dialNativePhoneNumber } from '../utils/nativeLauncher';
+import { dialNativePhoneNumber, sendNativeSms } from '../utils/nativeLauncher';
 
 interface OutputViewProps {
   lines: TerminalLine[];
@@ -118,7 +119,7 @@ export const OutputView: React.FC<OutputViewProps> = ({
                   className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
                   style={{ backgroundColor: `${theme.successColor}25`, color: theme.successColor }}
                 >
-                  Calling...
+                  Phone App Dispatched
                 </span>
               </div>
 
@@ -141,15 +142,6 @@ export const OutputView: React.FC<OutputViewProps> = ({
                 >
                   <PhoneCall size={13} />
                   <span>Open Phone Dialer ({dialNumber})</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => onRunQuickCommand('hangup')}
-                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border border-red-500/60 bg-red-950/30 text-red-400 hover:bg-red-900/40 transition-colors"
-                >
-                  <PhoneOff size={12} />
-                  <span>End Call</span>
                 </button>
 
                 <button
@@ -178,6 +170,96 @@ export const OutputView: React.FC<OutputViewProps> = ({
                 >
                   <MessageSquare size={12} />
                   <span>Send SMS</span>
+                </button>
+              </div>
+            </div>
+          );
+        }
+
+        if (line.metadata?.action === 'sms') {
+          const smsNumber = line.metadata.cleanPhone || line.metadata.phone;
+          const smsMessage = line.metadata.message || '';
+          return (
+            <div
+              className="p-3 rounded border my-2 text-xs md:text-sm shadow-md font-mono flex flex-col gap-2.5"
+              style={{
+                backgroundColor: `${theme.accentColor}12`,
+                borderColor: `${theme.accentColor}60`,
+                color: theme.fg,
+              }}
+            >
+              <div className="flex items-center justify-between border-b pb-2" style={{ borderColor: `${theme.accentColor}30` }}>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center"
+                    style={{ backgroundColor: `${theme.accentColor}25`, color: theme.accentColor }}
+                  >
+                    <MessageSquare size={15} />
+                  </div>
+                  <div>
+                    <div className="font-bold text-sm" style={{ color: theme.accentColor }}>
+                      {line.metadata.name || 'Direct Number'}
+                    </div>
+                    <div className="text-[11px] opacity-75 font-mono">
+                      ✉️ {line.metadata.phone}
+                    </div>
+                  </div>
+                </div>
+
+                <span
+                  className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider"
+                  style={{ backgroundColor: `${theme.accentColor}25`, color: theme.accentColor }}
+                >
+                  Messaging App Dispatched
+                </span>
+              </div>
+
+              <pre className="font-mono whitespace-pre-wrap break-all text-[11px] opacity-85 leading-relaxed">
+                {line.content}
+              </pre>
+
+              {/* Interactive Messaging Action Buttons */}
+              <div className="flex flex-wrap gap-2 pt-1 border-t" style={{ borderColor: `${theme.accentColor}20` }}>
+                <button
+                  type="button"
+                  onClick={() => sendNativeSms(smsNumber, smsMessage)}
+                  className="px-3 py-1.5 rounded text-xs font-bold flex items-center gap-1.5 border transition-transform hover:scale-105 active:scale-95 shadow-sm"
+                  style={{
+                    backgroundColor: theme.accentColor,
+                    borderColor: theme.accentColor,
+                    color: theme.bg,
+                  }}
+                >
+                  <Send size={13} />
+                  <span>Open in Messaging App</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand(`call ${smsNumber}`)}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    borderColor: `${theme.borderColor}80`,
+                    backgroundColor: `${theme.cardBg}bb`,
+                    color: theme.fg,
+                  }}
+                >
+                  <PhoneCall size={12} />
+                  <span>Call Contact</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onRunQuickCommand(`sms ${smsNumber} `)}
+                  className="px-2.5 py-1 rounded text-xs font-mono flex items-center gap-1 border hover:opacity-80 transition-opacity"
+                  style={{
+                    borderColor: `${theme.borderColor}80`,
+                    backgroundColor: `${theme.cardBg}bb`,
+                    color: theme.fg,
+                  }}
+                >
+                  <MessageSquare size={12} />
+                  <span>Compose Another SMS</span>
                 </button>
               </div>
             </div>

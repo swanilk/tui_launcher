@@ -7,9 +7,13 @@ import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
@@ -176,15 +180,85 @@ public class AppLauncherPlugin extends Plugin {
     }
 
     @PluginMethod
+    public void openSmsApp(PluginCall call) {
+        String phoneNumber = call.getString("phoneNumber");
+        String message = call.getString("message");
+        try {
+            Intent intent;
+            if (phoneNumber != null && !phoneNumber.trim().isEmpty()) {
+                intent = new Intent(Intent.ACTION_SENDTO);
+                intent.setData(Uri.parse("smsto:" + Uri.encode(phoneNumber.trim())));
+                if (message != null && !message.trim().isEmpty()) {
+                    intent.putExtra("sms_body", message);
+                }
+            } else {
+                PackageManager pm = getContext().getPackageManager();
+                intent = new Intent(Intent.ACTION_MAIN);
+                intent.addCategory(Intent.CATEGORY_APP_MESSAGING);
+                if (intent.resolveActivity(pm) == null) {
+                    intent = new Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:"));
+                }
+            }
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(intent);
+
+            JSObject ret = new JSObject();
+            ret.put("success", true);
+            ret.put("phoneNumber", phoneNumber != null ? phoneNumber : "");
+            ret.put("message", message != null ? message : "");
+            call.resolve(ret);
+        } catch (Exception e) {
+            try {
+                Uri uri = Uri.parse("sms:" + (phoneNumber != null ? Uri.encode(phoneNumber.trim()) : ""));
+                Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, uri);
+                if (message != null && !message.trim().isEmpty()) {
+                    fallbackIntent.putExtra("sms_body", message);
+                }
+                fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                getContext().startActivity(fallbackIntent);
+
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("fallback", true);
+                ret.put("phoneNumber", phoneNumber != null ? phoneNumber : "");
+                call.resolve(ret);
+            } catch (Exception ex) {
+                call.reject("Could not open messaging app: " + ex.getMessage());
+            }
+        }
+    }
+
+    @PluginMethod
     public void openHomeSettings(PluginCall call) {
         try {
-            // First attempt direct HOME_SETTINGS
+            // Android 10+ (API 29+) RoleManager direct role request dialog
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                try {
+                    android.app.role.RoleManager roleManager = getContext().getSystemService(android.app.role.RoleManager.class);
+                    if (roleManager != null && roleManager.isRoleAvailable(android.app.role.RoleManager.ROLE_HOME)) {
+                        if (!roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_HOME)) {
+                            Intent roleIntent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_HOME);
+                            roleIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            getContext().startActivity(roleIntent);
+
+                            JSObject ret = new JSObject();
+                            ret.put("success", true);
+                            ret.put("method", "role_manager");
+                            call.resolve(ret);
+                            return;
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+
+            // Direct HOME_SETTINGS
             Intent intent = new Intent(Settings.ACTION_HOME_SETTINGS);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             getContext().startActivity(intent);
 
             JSObject ret = new JSObject();
             ret.put("success", true);
+            ret.put("method", "home_settings");
             call.resolve(ret);
         } catch (Exception e) {
             try {
@@ -195,6 +269,7 @@ public class AppLauncherPlugin extends Plugin {
 
                 JSObject ret = new JSObject();
                 ret.put("success", true);
+                ret.put("method", "manage_default_apps");
                 call.resolve(ret);
             } catch (Exception ex) {
                 try {
@@ -205,12 +280,92 @@ public class AppLauncherPlugin extends Plugin {
 
                     JSObject ret = new JSObject();
                     ret.put("success", true);
+                    ret.put("method", "general_settings");
                     call.resolve(ret);
                 } catch (Exception ex2) {
                     call.reject("Could not open system home settings: " + ex2.getMessage());
                 }
             }
         }
+    }
+
+    @PluginMethod
+    public void setGestureNavigationMode(PluginCall call) {
+        boolean forceGesture = call.getBoolean("enable", true);
+        boolean appliedDirectly = false;
+        String message = "";
+
+        // 1. Programmatic switch via Settings.Secure (works if WRITE_SECURE_SETTINGS is granted)
+        try {
+            int targetMode = forceGesture ? 2 : 0; // 2 = Gestural, 0 = 3-button
+            boolean success = Settings.Secure.putInt(
+                getContext().getContentResolver(),
+                "navigation_mode",
+                targetMode
+            );
+            if (success) {
+                appliedDirectly = true;
+                message = forceGesture ? "Gesture navigation enabled directly via system secure settings" : "3-button navigation restored";
+            }
+        } catch (SecurityException secEx) {
+            appliedDirectly = false;
+        } catch (Exception ignored) {}
+
+        // 2. Hide 3-button navigation bar in launcher window with transient swipe
+        if (getActivity() != null) {
+            getActivity().runOnUiThread(() -> {
+                try {
+                    android.view.Window window = getActivity().getWindow();
+                    WindowCompat.setDecorFitsSystemWindows(window, false);
+                    window.setNavigationBarColor(android.graphics.Color.TRANSPARENT);
+                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
+                    if (controller != null) {
+                        if (forceGesture) {
+                            controller.hide(WindowInsetsCompat.Type.navigationBars());
+                            controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+                        } else {
+                            controller.show(WindowInsetsCompat.Type.navigationBars());
+                        }
+                    }
+                } catch (Exception ignored) {}
+            });
+        }
+
+        // 3. Dispatch system navigation settings if not directly applied
+        boolean settingsOpened = false;
+        if (!appliedDirectly) {
+            settingsOpened = launchSystemNavigationSettings();
+        }
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        ret.put("appliedDirectly", appliedDirectly);
+        ret.put("settingsOpened", settingsOpened);
+        ret.put("message", message.isEmpty() ? "Dispatched system navigation settings" : message);
+        call.resolve(ret);
+    }
+
+    private boolean launchSystemNavigationSettings() {
+        String[] actions = new String[] {
+            "android.settings.SYSTEM_NAVIGATION_SETTINGS",
+            "com.android.settings.GESTURE_NAVIGATION_SETTINGS",
+            "com.android.settings.action.GESTURE_NAVIGATION_SETTINGS",
+            "com.samsung.android.settings.NavigationBarSettingsActivity",
+            Settings.ACTION_DISPLAY_SETTINGS,
+            Settings.ACTION_SETTINGS
+        };
+
+        for (String action : actions) {
+            try {
+                Intent intent = new Intent(action);
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                if (intent.resolveActivity(getContext().getPackageManager()) != null) {
+                    getContext().startActivity(intent);
+                    return true;
+                }
+            } catch (Exception ignored) {}
+        }
+        return false;
     }
 
     @PluginMethod

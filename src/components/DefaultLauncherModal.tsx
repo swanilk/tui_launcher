@@ -31,7 +31,7 @@ import {
   Cpu
 } from 'lucide-react';
 import { soundManager } from '../utils/audio';
-import { openAndroidHomeSettings, isNativeAndroidApp } from '../utils/nativeLauncher';
+import { openAndroidHomeSettings, setNativeGestureNavigationMode, isNativeAndroidApp } from '../utils/nativeLauncher';
 
 interface DefaultLauncherModalProps {
   isOpen: boolean;
@@ -503,6 +503,43 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
                     </span>
                   </li>
                 </ol>
+              </div>
+
+              {/* Force Gesture Navigation Card */}
+              <div
+                className="p-3.5 rounded-xl border space-y-3"
+                style={{ borderColor: `${theme.accentColor}70`, backgroundColor: `${theme.accentColor}10` }}
+              >
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2 font-bold text-sm" style={{ color: theme.accentColor }}>
+                    <Sparkles size={16} />
+                    <span>FORCE GESTURE NAVIGATION (RECOMMENDED)</span>
+                  </div>
+                  <button
+                    onClick={async () => {
+                      playClick();
+                      await setNativeGestureNavigationMode(true);
+                    }}
+                    className="px-3 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1.5 hover:scale-105 active:scale-95 transition-all cursor-pointer shadow-md self-start sm:self-auto"
+                    style={{
+                      borderColor: theme.accentColor,
+                      color: theme.bg,
+                      backgroundColor: theme.accentColor,
+                    }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>Switch to Gesture Navigation</span>
+                  </button>
+                </div>
+
+                <p className="text-[11px] opacity-90 leading-relaxed">
+                  For the cleanest full-screen terminal experience, <strong>Gesture Navigation</strong> is enforced over 3-button navigation. This removes the Back, Home, and Recents bar, giving maximum vertical space to your terminal prompt and tabs.
+                </p>
+
+                <div className="text-[11px] opacity-80 space-y-1">
+                  <p>• <strong>Swipe Left / Right:</strong> Swipe horizontally anywhere across the screen to switch between <strong>Apps</strong>, <strong>Notifications</strong>, and <strong>Terminal</strong> sections.</p>
+                  <p>• <strong>Automatic Setup via ADB:</strong> Run <code className="text-emerald-400 bg-black/40 px-1 py-0.5 rounded font-mono">adb shell pm grant com.android.terminal.launcher android.permission.WRITE_SECURE_SETTINGS</code> for 1-click automatic system-wide gesture switching.</p>
+                </div>
               </div>
 
               {/* Note about Web Mode vs Native APK */}

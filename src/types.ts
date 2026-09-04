@@ -117,18 +117,6 @@ export interface RecentCall {
   duration?: string;
 }
 
-export interface ActiveCall {
-  id: string;
-  name: string;
-  phone: string;
-  status: 'dialing' | 'ringing' | 'connected' | 'ended';
-  startedAt: number;
-  connectedAt?: number;
-  isMuted?: boolean;
-  isSpeaker?: boolean;
-  dialedDigits?: string;
-}
-
 export interface BluetoothDevice {
   id: string;
   name: string;

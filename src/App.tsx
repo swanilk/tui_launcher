@@ -15,7 +15,6 @@ import {
   TodoItem, 
   ContactItem, 
   RecentCall,
-  ActiveCall,
   ActiveTimer,
   BatteryTelemetry,
   AppNotification,
@@ -50,7 +49,7 @@ import { BatteryMonitorModal } from './components/BatteryMonitorModal';
 import { CelestialClockModal, CelestialDateTimeSection } from './components/CelestialClock';
 import { DefaultLauncherModal } from './components/DefaultLauncherModal';
 import { MatrixScreen } from './components/MatrixScreen';
-import { ActiveCallOverlay } from './components/ActiveCallOverlay';
+import { useSwipeGesture } from './hooks/useSwipeGesture';
 import { CommandParser, CommandContext } from './utils/commandParser';
 import { virtualFS } from './utils/fileSystem';
 import { soundManager } from './utils/audio';
@@ -379,9 +378,6 @@ export default function App() {
     } catch {}
   }, [hotspotState]);
 
-  // 8e. Active Telephony VoLTE / Phone Call
-  const [activeCall, setActiveCall] = useState<ActiveCall | null>(null);
-
   // 9. Active Timers
   const [timers, setTimers] = useState<ActiveTimer[]>([]);
 
@@ -650,8 +646,6 @@ Press [Tab] anytime for auto-completion.`,
         setContacts,
         recentCalls,
         setRecentCalls,
-        activeCall,
-        setActiveCall,
         bluetoothState,
         setBluetoothState,
         hotspotState,
@@ -753,13 +747,78 @@ Press [Tab] anytime for auto-completion.`,
     fontFamily: `${config.fontFamily}, monospace`,
   };
 
-  const fontSizeClass = {
-    xs: 'text-xs',
-    sm: 'text-sm',
-    base: 'text-base',
-    lg: 'text-lg',
-    xl: 'text-xl',
-  }[config.fontSize];
+  // Main tab order for horizontal swipe gestures: Apps <-> Notifs <-> Term
+  const MAIN_TABS: MainTabType[] = ['apps', 'notifs', 'term'];
+
+  const [swipeIndicator, setSwipeIndicator] = useState<{
+    visible: boolean;
+    label: string;
+    direction: 'left' | 'right';
+  }>({
+    visible: false,
+    label: '',
+    direction: 'left',
+  });
+  const swipeIndicatorTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const showSwipeFeedback = useCallback((targetTab: MainTabType, direction: 'left' | 'right') => {
+    const labelMap: Record<MainTabType, string> = {
+      apps: 'APPS',
+      notifs: 'NOTIFICATIONS',
+      term: 'TERMINAL',
+    };
+    if (swipeIndicatorTimer.current) clearTimeout(swipeIndicatorTimer.current);
+    setSwipeIndicator({
+      visible: true,
+      label: labelMap[targetTab],
+      direction,
+    });
+    swipeIndicatorTimer.current = setTimeout(() => {
+      setSwipeIndicator((prev) => ({ ...prev, visible: false }));
+    }, 850);
+  }, []);
+
+  const handleSwipeLeft = useCallback(() => {
+    setActiveTab((current) => {
+      const idx = MAIN_TABS.indexOf(current);
+      const nextIdx = (idx + 1) % MAIN_TABS.length;
+      const nextTab = MAIN_TABS[nextIdx];
+      if (config.soundEnabled) {
+        soundManager.playKeyClick('mechanical', 0.2);
+      }
+      showSwipeFeedback(nextTab, 'left');
+      return nextTab;
+    });
+  }, [config.soundEnabled, showSwipeFeedback]);
+
+  const handleSwipeRight = useCallback(() => {
+    setActiveTab((current) => {
+      const idx = MAIN_TABS.indexOf(current);
+      const nextIdx = (idx - 1 + MAIN_TABS.length) % MAIN_TABS.length;
+      const nextTab = MAIN_TABS[nextIdx];
+      if (config.soundEnabled) {
+        soundManager.playKeyClick('mechanical', 0.2);
+      }
+      showSwipeFeedback(nextTab, 'right');
+      return nextTab;
+    });
+  }, [config.soundEnabled, showSwipeFeedback]);
+
+  const isAnyModalOpen =
+    isThemeModalOpen ||
+    isHistoryModalOpen ||
+    isBatteryModalOpen ||
+    isClockModalOpen ||
+    isDefaultLauncherModalOpen ||
+    isMatrixActive ||
+    Boolean(activeNanoModal);
+
+  const swipeHandlers = useSwipeGesture({
+    onSwipeLeft: handleSwipeLeft,
+    onSwipeRight: handleSwipeRight,
+    threshold: 40,
+    disabled: isAnyModalOpen,
+  });
 
   return (
     <div
@@ -810,8 +869,26 @@ Press [Tab] anytime for auto-completion.`,
         onOpenModal={() => setIsClockModalOpen(true)}
       />
 
-      {/* Main Tab Content View: Apps, Notifs, Term */}
-      <main className="flex-1 min-h-0 overflow-hidden px-2 sm:px-3 py-1 flex flex-col">
+      {/* Main Tab Content View: Apps, Notifs, Term (Swipe left/right to navigate) */}
+      <main
+        {...swipeHandlers}
+        className="flex-1 min-h-0 overflow-hidden px-2 sm:px-3 py-1 flex flex-col relative touch-pan-y"
+      >
+        {/* Floating Swipe Tab Switch Indicator */}
+        {swipeIndicator.visible && (
+          <div
+            className="absolute top-2 left-1/2 -translate-x-1/2 z-30 pointer-events-none px-3 py-1 rounded-full border text-xs font-mono font-bold flex items-center gap-1.5 shadow-lg backdrop-blur-md transition-all animate-bounce"
+            style={{
+              borderColor: currentTheme.promptColor,
+              backgroundColor: `${currentTheme.bg}f0`,
+              color: currentTheme.promptColor,
+              boxShadow: `0 0 12px ${currentTheme.promptColor}40`,
+            }}
+          >
+            <span className="text-[10px] opacity-75">{swipeIndicator.direction === 'left' ? 'SWIPE ➔' : '◀ SWIPE'}</span>
+            <span className="tracking-wider">{swipeIndicator.label}</span>
+          </div>
+        )}
         {activeTab === 'apps' && (
           <AppsTab
             theme={currentTheme}
@@ -997,21 +1074,6 @@ Press [Tab] anytime for auto-completion.`,
 
       {/* Matrix Digital Rain Screensaver */}
       {isMatrixActive && <MatrixScreen onExit={() => setIsMatrixActive(false)} />}
-
-      {/* Active VoLTE / Phone Telephony In-Call Overlay */}
-      {activeCall && (
-        <ActiveCallOverlay
-          activeCall={activeCall}
-          theme={currentTheme}
-          soundEnabled={config.soundEnabled}
-          soundVolume={config.soundVolume}
-          onEndCall={() => setActiveCall(null)}
-          onUpdateCall={(update) => setActiveCall((prev) => (prev ? { ...prev, ...update } : null))}
-          onAddRecentCall={(newRecent) =>
-            setRecentCalls((prev) => [newRecent, ...prev.filter((r) => r.phone !== newRecent.phone)].slice(0, 30))
-          }
-        />
-      )}
     </div>
   );
 }

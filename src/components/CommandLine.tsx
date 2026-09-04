@@ -362,6 +362,83 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       return;
     }
 
+    // 3b. Check if user is typing an SMS command: "sms", "msg", "message"
+    const smsMatch = trimmed.match(/^(sms|msg|message)(\s+(.*))?$/i);
+    if (smsMatch) {
+      const smsCmd = smsMatch[1].toLowerCase();
+      const rawArg = smsMatch[3] ? smsMatch[3].trim() : '';
+      const parts = rawArg.split(/\s+/);
+      const recipientQuery = parts[0] ? parts[0].toLowerCase() : '';
+      const cleanDigits = recipientQuery.replace(/\D/g, '');
+      const messageBody = parts.slice(1).join(' ');
+      const items: SuggestionItem[] = [];
+
+      if (!recipientQuery) {
+        items.push({
+          id: 'cmd-sms-help',
+          type: 'command',
+          label: `${smsCmd} <contact|number> [message]`,
+          subtitle: 'Send SMS via native Messaging app',
+          value: `${smsCmd} `,
+          fullReplacement: `${smsCmd} `,
+        });
+
+        contacts.slice(0, 7).forEach((c) => {
+          items.push({
+            id: `sms-contact-${c.id}`,
+            type: 'contact',
+            label: c.name,
+            subtitle: `✉️ ${c.phone} • Compose SMS`,
+            phoneNumber: c.phone,
+            value: c.phone,
+            fullReplacement: `${smsCmd} "${c.name}" `,
+          });
+        });
+      } else {
+        const matchingContacts = contacts.filter((c) => {
+          const nameMatches = c.name.toLowerCase().includes(recipientQuery);
+          const phoneClean = c.phone.replace(/\D/g, '');
+          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
+          return nameMatches || phoneMatches;
+        });
+
+        matchingContacts.forEach((c) => {
+          const replacement = messageBody
+            ? `${smsCmd} "${c.name}" ${messageBody}`
+            : `${smsCmd} "${c.name}" `;
+          items.push({
+            id: `sms-contact-match-${c.id}`,
+            type: 'contact',
+            label: c.name,
+            subtitle: `✉️ ${c.phone} • Directory`,
+            phoneNumber: c.phone,
+            value: c.phone,
+            fullReplacement: replacement,
+          });
+        });
+
+        if (cleanDigits.length >= 3) {
+          const replacement = messageBody
+            ? `${smsCmd} ${recipientQuery} ${messageBody}`
+            : `${smsCmd} ${recipientQuery} `;
+          items.unshift({
+            id: `sms-direct-${cleanDigits}`,
+            type: 'contact',
+            label: `SMS to ${recipientQuery}`,
+            subtitle: 'Direct Number',
+            phoneNumber: recipientQuery,
+            value: recipientQuery,
+            fullReplacement: replacement,
+          });
+        }
+      }
+
+      setSuggestions(items);
+      setSelectedSuggestionIdx(0);
+      setShowSuggestions(items.length > 0);
+      return;
+    }
+
     // 4. Check if user is typing a bluetooth command: "bluetooth", "bt", "bluetoothctl", "bluez"
     const btMatch = trimmed.match(/^(bluetooth|bt|bluetoothctl|bluez)(\s+(.*))?$/i);
     if (btMatch) {
