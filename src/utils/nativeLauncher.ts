@@ -4,7 +4,7 @@
  */
 
 import { registerPlugin, Capacitor } from '@capacitor/core';
-import { AndroidApp, AppNotification } from '../types';
+import { AndroidApp, AppNotification, ContactItem, RecentCall } from '../types';
 
 export interface NativeInstalledApp {
   id: string;
@@ -926,5 +926,40 @@ export function subscribeToNativeNotifications(
     if (subRemoved && typeof subRemoved.remove === 'function') subRemoved.remove();
   };
 }
+
+/**
+ * Fetch device contacts from Android ContactsContract (if permitted)
+ */
+export async function getDeviceContacts(): Promise<ContactItem[]> {
+  if (isNativeAndroidApp() && (AppLauncher as any).getDeviceContacts) {
+    try {
+      const res = await (AppLauncher as any).getDeviceContacts();
+      if (res && res.hasPermission && Array.isArray(res.contacts)) {
+        return res.contacts;
+      }
+    } catch (err) {
+      console.warn('getDeviceContacts error:', err);
+    }
+  }
+  return [];
+}
+
+/**
+ * Fetch device recent calls from Android CallLog (if permitted)
+ */
+export async function getDeviceRecentCalls(): Promise<RecentCall[]> {
+  if (isNativeAndroidApp() && (AppLauncher as any).getDeviceRecentCalls) {
+    try {
+      const res = await (AppLauncher as any).getDeviceRecentCalls();
+      if (res && res.hasPermission && Array.isArray(res.calls)) {
+        return res.calls;
+      }
+    } catch (err) {
+      console.warn('getDeviceRecentCalls error:', err);
+    }
+  }
+  return [];
+}
+
 
 

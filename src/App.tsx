@@ -61,12 +61,21 @@ import {
   isNativeNotificationAccessGranted,
   openNativeNotificationAccessSettings,
   dismissNativeNotification,
-  subscribeToNativeNotifications
+  subscribeToNativeNotifications,
+  getDeviceContacts,
+  getDeviceRecentCalls
 } from './utils/nativeLauncher';
 
 export default function App() {
   // Active Main Tab: 'apps' | 'notifs' | 'term'
   const [activeTab, setActiveTab] = useState<MainTabType>('term');
+  const [prevTab, setPrevTab] = useState<MainTabType>('term');
+  const [slideDirection, setSlideDirection] = useState<'left' | 'right'>('left');
+  const [isTabTransitioning, setIsTabTransitioning] = useState(false);
+  const tabTransitionTimer = useRef<NodeJS.Timeout | null>(null);
+
+  // Main tab order for horizontal swipe gestures: Apps <-> Notifs <-> Term
+  const MAIN_TABS: MainTabType[] = useMemo(() => ['apps', 'notifs', 'term'], []);
 
   // 1. Persistent Launcher Configurations
   const [config, setConfig] = useState<LauncherConfig>(() => {
@@ -83,6 +92,62 @@ export default function App() {
       localStorage.setItem('android_tui_config', JSON.stringify(config));
     } catch {}
   }, [config]);
+
+  const [swipeIndicator, setSwipeIndicator] = useState<{
+    visible: boolean;
+    label: string;
+    direction: 'left' | 'right';
+  }>({
+    visible: false,
+    label: '',
+    direction: 'left',
+  });
+  const swipeIndicatorTimer = useRef<NodeJS.Timeout | null>(null);
+
+  const showSwipeFeedback = useCallback((targetTab: MainTabType, direction: 'left' | 'right') => {
+    const labelMap: Record<MainTabType, string> = {
+      apps: 'APPS',
+      notifs: 'NOTIFICATIONS',
+      term: 'TERMINAL',
+    };
+    if (swipeIndicatorTimer.current) clearTimeout(swipeIndicatorTimer.current);
+    setSwipeIndicator({
+      visible: true,
+      label: labelMap[targetTab],
+      direction,
+    });
+    swipeIndicatorTimer.current = setTimeout(() => {
+      setSwipeIndicator((prev) => ({ ...prev, visible: false }));
+    }, 850);
+  }, []);
+
+  const switchTab = useCallback(
+    (targetTab: MainTabType, forcedDir?: 'left' | 'right', playAudio: boolean = true) => {
+      setActiveTab((current) => {
+        if (targetTab === current) return current;
+        const curIdx = MAIN_TABS.indexOf(current);
+        const tgtIdx = MAIN_TABS.indexOf(targetTab);
+        const dir = forcedDir || (tgtIdx > curIdx ? 'left' : 'right');
+
+        setSlideDirection(dir);
+        setPrevTab(current);
+        setIsTabTransitioning(true);
+
+        if (playAudio && config.soundEnabled) {
+          soundManager.playKeyClick('mechanical', 0.2);
+        }
+        showSwipeFeedback(targetTab, dir);
+
+        if (tabTransitionTimer.current) clearTimeout(tabTransitionTimer.current);
+        tabTransitionTimer.current = setTimeout(() => {
+          setIsTabTransitioning(false);
+        }, 340);
+
+        return targetTab;
+      });
+    },
+    [MAIN_TABS, config.soundEnabled, showSwipeFeedback]
+  );
 
   // 2. Persistent Command History
   const [history, setHistory] = useState<string[]>(() => {
@@ -346,6 +411,32 @@ export default function App() {
     } catch {}
   }, [recentCalls]);
 
+  // Sync native device contacts & call logs on startup
+  useEffect(() => {
+    if (isNativeAndroidApp()) {
+      getDeviceContacts().then((devContacts) => {
+        if (devContacts && devContacts.length > 0) {
+          setContacts((prev) => {
+            const existingPhones = new Set(prev.map((c) => c.phone.replace(/\D/g, '')));
+            const newOnes = devContacts.filter((c) => !existingPhones.has(c.phone.replace(/\D/g, '')));
+            return [...prev, ...newOnes];
+          });
+        }
+      }).catch(() => {});
+
+      getDeviceRecentCalls().then((devCalls) => {
+        if (devCalls && devCalls.length > 0) {
+          setRecentCalls((prev) => {
+            const existingIds = new Set(prev.map((r) => `${r.phone.replace(/\D/g, '')}-${r.timestamp}`));
+            const newOnes = devCalls.filter((r) => !existingIds.has(`${r.phone.replace(/\D/g, '')}-${r.timestamp}`));
+            const merged = [...newOnes, ...prev].sort((a, b) => b.timestamp - a.timestamp);
+            return merged.slice(0, 50);
+          });
+        }
+      }).catch(() => {});
+    }
+  }, []);
+
   // 8c. Persistent Bluetooth State
   const [bluetoothState, setBluetoothState] = useState<BluetoothState>(() => {
     try {
@@ -545,19 +636,19 @@ Press [Tab] anytime for auto-completion.`,
     const handleGlobalShortcuts = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.altKey) && e.key === '1') {
         e.preventDefault();
-        setActiveTab('apps');
+        switchTab('apps');
       } else if ((e.ctrlKey || e.altKey) && e.key === '2') {
         e.preventDefault();
-        setActiveTab('notifs');
+        switchTab('notifs');
       } else if ((e.ctrlKey || e.altKey) && e.key === '3') {
         e.preventDefault();
-        setActiveTab('term');
+        switchTab('term');
       }
     };
 
     window.addEventListener('keydown', handleGlobalShortcuts);
     return () => window.removeEventListener('keydown', handleGlobalShortcuts);
-  }, []);
+  }, [switchTab]);
 
   const executeCommandRef = useRef<(cmd: string) => void>(() => {});
 
@@ -596,12 +687,12 @@ Press [Tab] anytime for auto-completion.`,
       // Automatically route tab view based on command:
       const cmdFirst = trimmed.split(' ')[0].toLowerCase();
       if (cmdFirst === 'apps' || cmdFirst === 'drawer' || (cmdFirst === 'tab' && trimmed.toLowerCase().includes('app'))) {
-        setActiveTab('apps');
+        switchTab('apps', undefined, false);
       } else if (cmdFirst === 'notifications' || cmdFirst === 'notifs' || cmdFirst === 'notif' || (cmdFirst === 'tab' && trimmed.toLowerCase().includes('notif'))) {
-        setActiveTab('notifs');
+        switchTab('notifs', undefined, false);
       } else {
         // "All command output should appear in that tab." -> automatically switch to 'term' tab!
-        setActiveTab('term');
+        switchTab('term', undefined, false);
       }
 
       // Append command to persistent history
@@ -667,7 +758,7 @@ Press [Tab] anytime for auto-completion.`,
         togglePowerSaver: () => setPowerSaver((p) => !p),
         setMatrixActive: (active: boolean) => setIsMatrixActive(active),
         activeTab,
-        setActiveTab,
+        setActiveTab: (tab: MainTabType) => switchTab(tab),
         batteryLevel,
         isCharging,
         batteryData: batteryTelemetry,
@@ -755,62 +846,52 @@ Press [Tab] anytime for auto-completion.`,
     xl: 'text-xl',
   }[config.fontSize] || 'text-sm';
 
-  // Main tab order for horizontal swipe gestures: Apps <-> Notifs <-> Term
-  const MAIN_TABS: MainTabType[] = ['apps', 'notifs', 'term'];
-
-  const [swipeIndicator, setSwipeIndicator] = useState<{
-    visible: boolean;
-    label: string;
-    direction: 'left' | 'right';
-  }>({
-    visible: false,
-    label: '',
-    direction: 'left',
-  });
-  const swipeIndicatorTimer = useRef<NodeJS.Timeout | null>(null);
-
-  const showSwipeFeedback = useCallback((targetTab: MainTabType, direction: 'left' | 'right') => {
-    const labelMap: Record<MainTabType, string> = {
-      apps: 'APPS',
-      notifs: 'NOTIFICATIONS',
-      term: 'TERMINAL',
-    };
-    if (swipeIndicatorTimer.current) clearTimeout(swipeIndicatorTimer.current);
-    setSwipeIndicator({
-      visible: true,
-      label: labelMap[targetTab],
-      direction,
-    });
-    swipeIndicatorTimer.current = setTimeout(() => {
-      setSwipeIndicator((prev) => ({ ...prev, visible: false }));
-    }, 850);
-  }, []);
-
   const handleSwipeLeft = useCallback(() => {
-    setActiveTab((current) => {
-      const idx = MAIN_TABS.indexOf(current);
-      const nextIdx = (idx + 1) % MAIN_TABS.length;
-      const nextTab = MAIN_TABS[nextIdx];
-      if (config.soundEnabled) {
-        soundManager.playKeyClick('mechanical', 0.2);
-      }
-      showSwipeFeedback(nextTab, 'left');
-      return nextTab;
-    });
-  }, [config.soundEnabled, showSwipeFeedback]);
+    const idx = MAIN_TABS.indexOf(activeTab);
+    const nextIdx = (idx + 1) % MAIN_TABS.length;
+    switchTab(MAIN_TABS[nextIdx], 'left', true);
+  }, [activeTab, MAIN_TABS, switchTab]);
 
   const handleSwipeRight = useCallback(() => {
-    setActiveTab((current) => {
-      const idx = MAIN_TABS.indexOf(current);
-      const nextIdx = (idx - 1 + MAIN_TABS.length) % MAIN_TABS.length;
-      const nextTab = MAIN_TABS[nextIdx];
-      if (config.soundEnabled) {
-        soundManager.playKeyClick('mechanical', 0.2);
+    const idx = MAIN_TABS.indexOf(activeTab);
+    const nextIdx = (idx - 1 + MAIN_TABS.length) % MAIN_TABS.length;
+    switchTab(MAIN_TABS[nextIdx], 'right', true);
+  }, [activeTab, MAIN_TABS, switchTab]);
+
+  const getTabLayerStyle = useCallback(
+    (tab: MainTabType): React.CSSProperties => {
+      if (tab === activeTab) {
+        return {
+          transform: 'translate3d(0, 0, 0)',
+          opacity: 1,
+          zIndex: 10,
+          pointerEvents: 'auto',
+          transition: isTabTransitioning
+            ? 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease'
+            : 'none',
+        };
       }
-      showSwipeFeedback(nextTab, 'right');
-      return nextTab;
-    });
-  }, [config.soundEnabled, showSwipeFeedback]);
+
+      if (tab === prevTab && isTabTransitioning) {
+        return {
+          transform: slideDirection === 'left' ? 'translate3d(-100%, 0, 0)' : 'translate3d(100%, 0, 0)',
+          opacity: 0,
+          zIndex: 5,
+          pointerEvents: 'none',
+          transition: 'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease',
+        };
+      }
+
+      return {
+        transform: slideDirection === 'left' ? 'translate3d(100%, 0, 0)' : 'translate3d(-100%, 0, 0)',
+        opacity: 0,
+        zIndex: 0,
+        pointerEvents: 'none',
+        visibility: 'hidden',
+      };
+    },
+    [activeTab, prevTab, isTabTransitioning, slideDirection]
+  );
 
   const isAnyModalOpen =
     isThemeModalOpen ||
@@ -857,7 +938,7 @@ Press [Tab] anytime for auto-completion.`,
           bluetoothState={bluetoothState}
           hotspotState={hotspotState}
           activeTab={activeTab}
-          onSelectTab={(tab) => setActiveTab(tab)}
+          onSelectTab={(tab) => switchTab(tab)}
           appsCount={apps.length}
           notifsCount={notifications.length}
           termLinesCount={lines.length}
@@ -877,7 +958,7 @@ Press [Tab] anytime for auto-completion.`,
         onOpenModal={() => setIsClockModalOpen(true)}
       />
 
-      {/* Main Tab Content View: Apps, Notifs, Term (Swipe left/right to navigate) */}
+      {/* Main Tab Content View: Apps, Notifs, Term (Smooth Directional Swipe Transitions) */}
       <main
         {...swipeHandlers}
         className="flex-1 min-h-0 overflow-hidden px-2 sm:px-3 py-1 flex flex-col relative touch-pan-y"
@@ -897,63 +978,78 @@ Press [Tab] anytime for auto-completion.`,
             <span className="tracking-wider">{swipeIndicator.label}</span>
           </div>
         )}
-        {activeTab === 'apps' && (
-          <AppsTab
-            theme={currentTheme}
-            apps={apps}
-            onOpenApp={handleLaunchApp}
-            onRunCommand={handleExecuteCommand}
-            onSyncApps={() => { handleSyncNativeApps(); }}
-            isSyncing={isSyncingApps}
-            onToggleFavorite={(appId) => {
-              setApps((prev) =>
-                prev.map((a) => (a.id === appId ? { ...a, favorite: !a.favorite } : a))
-              );
-            }}
-            onUninstallApp={(app) => {
-              handleExecuteCommand(`uninstall "${app.name}"`);
-            }}
-            onOpenDefaultLauncherModal={() => setIsDefaultLauncherModalOpen(true)}
-            soundEnabled={config.soundEnabled}
-          />
-        )}
 
-        {activeTab === 'notifs' && (
-          <NotifsTab
-            theme={currentTheme}
-            notifications={notifications}
-            onDismissNotification={(id) => {
-              dismissNativeNotification(id);
-              setNotifications((prev) => prev.filter((n) => n.id !== id));
-            }}
-            onClearAllNotifications={() => {
-              setNotifications([]);
-            }}
-            onAddNotification={(notif) => {
-              setNotifications((prev) => [notif, ...prev]);
-            }}
-            onRunCommand={handleExecuteCommand}
-            onOpenApp={handleLaunchApp}
-            apps={apps}
-            soundEnabled={config.soundEnabled}
-            onSyncNotifications={handleSyncNotifications}
-            isSyncing={isSyncingNotifications}
-            isAccessGranted={isNotificationAccessGranted}
-            onOpenAccessSettings={openNativeNotificationAccessSettings}
-          />
-        )}
+        <div className="relative w-full h-full flex-1 min-h-0 overflow-hidden">
+          {/* APPS TAB LAYER */}
+          <div
+            className="absolute inset-0 w-full h-full flex flex-col min-h-0 overflow-hidden will-change-transform"
+            style={getTabLayerStyle('apps')}
+          >
+            <AppsTab
+              theme={currentTheme}
+              apps={apps}
+              onOpenApp={handleLaunchApp}
+              onRunCommand={handleExecuteCommand}
+              onSyncApps={() => { handleSyncNativeApps(); }}
+              isSyncing={isSyncingApps}
+              onToggleFavorite={(appId) => {
+                setApps((prev) =>
+                  prev.map((a) => (a.id === appId ? { ...a, favorite: !a.favorite } : a))
+                );
+              }}
+              onUninstallApp={(app) => {
+                handleExecuteCommand(`uninstall "${app.name}"`);
+              }}
+              onOpenDefaultLauncherModal={() => setIsDefaultLauncherModalOpen(true)}
+              soundEnabled={config.soundEnabled}
+            />
+          </div>
 
-        {activeTab === 'term' && (
-          <TermTab
-            lines={lines}
-            theme={currentTheme}
-            onRunQuickCommand={handleExecuteCommand}
-            onOpenApp={handleLaunchApp}
-            onClearTerminal={() => setLines([])}
-            apps={apps}
-            soundEnabled={config.soundEnabled}
-          />
-        )}
+          {/* NOTIFS TAB LAYER */}
+          <div
+            className="absolute inset-0 w-full h-full flex flex-col min-h-0 overflow-hidden will-change-transform"
+            style={getTabLayerStyle('notifs')}
+          >
+            <NotifsTab
+              theme={currentTheme}
+              notifications={notifications}
+              onDismissNotification={(id) => {
+                dismissNativeNotification(id);
+                setNotifications((prev) => prev.filter((n) => n.id !== id));
+              }}
+              onClearAllNotifications={() => {
+                setNotifications([]);
+              }}
+              onAddNotification={(notif) => {
+                setNotifications((prev) => [notif, ...prev]);
+              }}
+              onRunCommand={handleExecuteCommand}
+              onOpenApp={handleLaunchApp}
+              apps={apps}
+              soundEnabled={config.soundEnabled}
+              onSyncNotifications={handleSyncNotifications}
+              isSyncing={isSyncingNotifications}
+              isAccessGranted={isNotificationAccessGranted}
+              onOpenAccessSettings={openNativeNotificationAccessSettings}
+            />
+          </div>
+
+          {/* TERM TAB LAYER */}
+          <div
+            className="absolute inset-0 w-full h-full flex flex-col min-h-0 overflow-hidden will-change-transform"
+            style={getTabLayerStyle('term')}
+          >
+            <TermTab
+              lines={lines}
+              theme={currentTheme}
+              onRunQuickCommand={handleExecuteCommand}
+              onOpenApp={handleLaunchApp}
+              onClearTerminal={() => setLines([])}
+              apps={apps}
+              soundEnabled={config.soundEnabled}
+            />
+          </div>
+        </div>
       </main>
 
       {/* Footer Command Line and Mobile Touch Toolbar */}
@@ -982,10 +1078,10 @@ Press [Tab] anytime for auto-completion.`,
             soundEnabled={config.soundEnabled}
             onKeyPress={handleTouchKeyPress}
             onClear={() => setLines([])}
-            onOpenApps={() => setActiveTab('apps')}
+            onOpenApps={() => switchTab('apps')}
             onOpenThemes={() => setIsThemeModalOpen(true)}
             onOpenHelp={() => handleExecuteCommand('help')}
-            onOpenNotifications={() => setActiveTab('notifs')}
+            onOpenNotifications={() => switchTab('notifs')}
             onOpenBattery={() => setIsBatteryModalOpen(true)}
             onOpenDefaultLauncher={() => setIsDefaultLauncherModalOpen(true)}
           />

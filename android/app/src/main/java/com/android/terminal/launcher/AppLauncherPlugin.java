@@ -10,6 +10,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.provider.ContactsContract;
+import android.provider.CallLog;
+import android.content.ContentResolver;
+import android.database.Cursor;
+import androidx.core.content.ContextCompat;
 import androidx.core.app.NotificationManagerCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsCompat;
@@ -878,6 +883,138 @@ public class AppLauncherPlugin extends Plugin {
             call.resolve(ret);
         } catch (Exception e) {
             call.reject("Could not dismiss notification: " + e.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void getDeviceContacts(PluginCall call) {
+        if (ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.READ_CONTACTS) 
+                != PackageManager.PERMISSION_GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", false);
+            ret.put("contacts", new JSArray());
+            call.resolve(ret);
+            return;
+        }
+
+        try {
+            JSArray contactsArr = new JSArray();
+            ContentResolver cr = getContext().getContentResolver();
+            Cursor cursor = cr.query(
+                ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                new String[]{
+                    ContactsContract.CommonDataKinds.Phone.CONTACT_ID,
+                    ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                    ContactsContract.CommonDataKinds.Phone.NUMBER
+                },
+                null,
+                null,
+                ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+            );
+
+            if (cursor != null) {
+                Set<String> seenNumbers = new java.util.HashSet<>();
+                while (cursor.moveToNext() && contactsArr.length() < 100) {
+                    String id = cursor.getString(0);
+                    String name = cursor.getString(1);
+                    String number = cursor.getString(2);
+                    if (number == null || number.trim().isEmpty()) continue;
+                    String cleanNum = number.replaceAll("[^\\d+]", "");
+                    if (cleanNum.isEmpty() || seenNumbers.contains(cleanNum)) continue;
+                    seenNumbers.add(cleanNum);
+
+                    JSObject contact = new JSObject();
+                    contact.put("id", id != null ? id : "c-" + cleanNum);
+                    contact.put("name", name != null && !name.trim().isEmpty() ? name.trim() : number.trim());
+                    contact.put("phone", number.trim());
+                    contact.put("email", "");
+                    contactsArr.put(contact);
+                }
+                cursor.close();
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", true);
+            ret.put("contacts", contactsArr);
+            ret.put("count", contactsArr.length());
+            call.resolve(ret);
+        } catch (Exception e) {
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", false);
+            ret.put("error", e.getMessage());
+            ret.put("contacts", new JSArray());
+            call.resolve(ret);
+        }
+    }
+
+    @PluginMethod
+    public void getDeviceRecentCalls(PluginCall call) {
+        if (ContextCompat.checkSelfPermission(getContext(), android.Manifest.permission.READ_CALL_LOG) 
+                != PackageManager.PERMISSION_GRANTED) {
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", false);
+            ret.put("calls", new JSArray());
+            call.resolve(ret);
+            return;
+        }
+
+        try {
+            JSArray callsArr = new JSArray();
+            ContentResolver cr = getContext().getContentResolver();
+            Cursor cursor = cr.query(
+                CallLog.Calls.CONTENT_URI,
+                new String[]{
+                    CallLog.Calls._ID,
+                    CallLog.Calls.CACHED_NAME,
+                    CallLog.Calls.NUMBER,
+                    CallLog.Calls.DATE,
+                    CallLog.Calls.TYPE,
+                    CallLog.Calls.DURATION
+                },
+                null,
+                null,
+                CallLog.Calls.DATE + " DESC"
+            );
+
+            if (cursor != null) {
+                while (cursor.moveToNext() && callsArr.length() < 50) {
+                    String id = cursor.getString(0);
+                    String name = cursor.getString(1);
+                    String number = cursor.getString(2);
+                    long date = cursor.getLong(3);
+                    int typeInt = cursor.getInt(4);
+                    long durationSec = cursor.getLong(5);
+
+                    String typeStr = "outgoing";
+                    if (typeInt == CallLog.Calls.INCOMING_TYPE) typeStr = "incoming";
+                    else if (typeInt == CallLog.Calls.MISSED_TYPE) typeStr = "missed";
+
+                    String durationStr = durationSec > 0 ? (durationSec / 60) + "m " + (durationSec % 60) + "s" : "";
+
+                    JSObject callObj = new JSObject();
+                    callObj.put("id", id != null ? id : "rc-" + date);
+                    callObj.put("name", name != null && !name.trim().isEmpty() ? name.trim() : (number != null && !number.trim().isEmpty() ? number.trim() : "Unknown"));
+                    callObj.put("phone", number != null ? number.trim() : "");
+                    callObj.put("timestamp", date);
+                    callObj.put("type", typeStr);
+                    if (!durationStr.isEmpty()) callObj.put("duration", durationStr);
+
+                    callsArr.put(callObj);
+                }
+                cursor.close();
+            }
+
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", true);
+            ret.put("calls", callsArr);
+            ret.put("count", callsArr.length());
+            call.resolve(ret);
+        } catch (Exception e) {
+            JSObject ret = new JSObject();
+            ret.put("hasPermission", false);
+            ret.put("error", e.getMessage());
+            ret.put("calls", new JSArray());
+            call.resolve(ret);
         }
     }
 }

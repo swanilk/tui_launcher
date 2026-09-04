@@ -29,7 +29,9 @@ import {
   BluetoothSearching,
   Power,
   Flame,
-  Radio
+  Radio,
+  MessageSquare,
+  Send
 } from 'lucide-react';
 
 function formatTimeAgo(ts: number): string {
@@ -53,7 +55,196 @@ export interface SuggestionItem {
   phoneNumber?: string;
   appObj?: AndroidApp;
   bluetoothDevice?: BluetoothDevice;
-  actionKind?: 'open' | 'uninstall' | 'call' | 'exec' | 'bluetooth_connect' | 'bluetooth_toggle';
+  actionKind?: 'open' | 'uninstall' | 'call' | 'sms' | 'exec' | 'bluetooth_connect' | 'bluetooth_toggle';
+}
+
+/**
+ * Shared helper to generate contact autocomplete suggestions prioritizing recent called contacts first
+ */
+function buildContactSuggestions({
+  mode,
+  cmdName,
+  query,
+  messageBody,
+  recentCalls = [],
+  contacts = [],
+  hasTrailingSpace,
+}: {
+  mode: 'call' | 'sms';
+  cmdName: string;
+  query: string;
+  messageBody?: string;
+  recentCalls?: RecentCall[];
+  contacts?: ContactItem[];
+  hasTrailingSpace: boolean;
+}): SuggestionItem[] {
+  const cleanQueryDigits = query.replace(/\D/g, '');
+  const items: SuggestionItem[] = [];
+
+  // 1. Sort recent calls by timestamp descending (newest calls first)
+  const sortedRecent = [...(recentCalls || [])].sort((a, b) => b.timestamp - a.timestamp);
+
+  // 2. Deduplicate recent calls by phone digits / name so each unique person appears once with their newest call
+  const seenKeys = new Set<string>();
+  const deduplicatedRecent: RecentCall[] = [];
+  for (const rc of sortedRecent) {
+    const cleanPhone = rc.phone ? rc.phone.replace(/\D/g, '') : '';
+    const key = cleanPhone.length >= 4 ? cleanPhone : (rc.name || '').toLowerCase().trim();
+    if (!key || seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    deduplicatedRecent.push(rc);
+  }
+
+  // 3. Filter matching recent contacts
+  const matchingRecent = deduplicatedRecent.filter((rc) => {
+    if (!query) return true;
+    const nameMatch = (rc.name || '').toLowerCase().includes(query);
+    const cleanPhone = (rc.phone || '').replace(/\D/g, '');
+    const phoneMatch = cleanQueryDigits.length > 0 && cleanPhone.includes(cleanQueryDigits);
+    return nameMatch || phoneMatch;
+  });
+
+  // 4. Add recent called contacts to suggestions FIRST
+  matchingRecent.forEach((rc) => {
+    const dirMatch = (contacts || []).find((c) => {
+      const cClean = c.phone ? c.phone.replace(/\D/g, '') : '';
+      const rcClean = rc.phone ? rc.phone.replace(/\D/g, '') : '';
+      return (cClean.length >= 4 && cClean === rcClean) || (c.name && rc.name && c.name.toLowerCase() === rc.name.toLowerCase());
+    });
+
+    const displayName = rc.name && rc.name !== rc.phone ? rc.name : dirMatch?.name || rc.name || rc.phone;
+    const phoneStr = rc.phone || dirMatch?.phone || '';
+    const timeStr = formatTimeAgo(rc.timestamp);
+
+    let subtitle = '';
+    if (mode === 'call') {
+      const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
+      subtitle = `🕒 Recent (${timeStr}) • ${phoneStr} [${typeBadge}${rc.duration ? ` • ${rc.duration}` : ''}]`;
+    } else {
+      subtitle = `🕒 Recent (${timeStr}) • ${phoneStr}`;
+    }
+
+    let fullReplacement = '';
+    if (mode === 'call') {
+      const quoteNeeded = displayName.includes(' ');
+      fullReplacement = quoteNeeded ? `${cmdName} "${displayName}"` : `${cmdName} ${displayName}`;
+    } else {
+      const quoteNeeded = displayName.includes(' ');
+      const target = quoteNeeded ? `"${displayName}"` : displayName;
+      fullReplacement = messageBody ? `${cmdName} ${target} ${messageBody}` : `${cmdName} ${target} `;
+    }
+
+    items.push({
+      id: `recent-${mode}-${rc.id}`,
+      type: 'contact',
+      label: displayName,
+      subtitle,
+      phoneNumber: phoneStr,
+      value: displayName,
+      fullReplacement,
+      actionKind: mode,
+    });
+  });
+
+  // 5. Add remaining contacts from directory not present in recent calls, sorted alphabetically
+  const remainingContacts = (contacts || []).filter((c) => {
+    const clean = c.phone ? c.phone.replace(/\D/g, '') : '';
+    const key = clean.length >= 4 ? clean : c.name.toLowerCase().trim();
+    return !seenKeys.has(key);
+  });
+
+  remainingContacts.sort((a, b) => a.name.localeCompare(b.name));
+
+  const matchingDir = remainingContacts.filter((c) => {
+    if (!query) return true;
+    const nameMatch = c.name.toLowerCase().includes(query);
+    const cleanPhone = (c.phone || '').replace(/\D/g, '');
+    const phoneMatch = cleanQueryDigits.length > 0 && cleanPhone.includes(cleanQueryDigits);
+    const emailMatch = (c.email || '').toLowerCase().includes(query);
+    return nameMatch || phoneMatch || emailMatch;
+  });
+
+  matchingDir.forEach((c) => {
+    const subtitle = mode === 'call' ? `${c.phone} • Directory` : `✉️ ${c.phone} • Directory`;
+    let fullReplacement = '';
+    if (mode === 'call') {
+      const quoteNeeded = c.name.includes(' ');
+      fullReplacement = quoteNeeded ? `${cmdName} "${c.name}"` : `${cmdName} ${c.name}`;
+    } else {
+      const quoteNeeded = c.name.includes(' ');
+      const target = quoteNeeded ? `"${c.name}"` : c.name;
+      fullReplacement = messageBody ? `${cmdName} ${target} ${messageBody}` : `${cmdName} ${target} `;
+    }
+
+    items.push({
+      id: `dir-${mode}-${c.id}`,
+      type: 'contact',
+      label: c.name,
+      subtitle,
+      phoneNumber: c.phone,
+      value: c.name,
+      fullReplacement,
+      actionKind: mode,
+    });
+  });
+
+  // 6. If user typed numeric digits and not matching any contact exactly, offer direct number option
+  if (cleanQueryDigits.length >= 3) {
+    const isExactPhone = items.some((it) => (it.phoneNumber || '').replace(/\D/g, '').includes(cleanQueryDigits));
+    if (!isExactPhone) {
+      if (mode === 'call') {
+        items.unshift({
+          id: `direct-dial-${cleanQueryDigits}`,
+          type: 'contact',
+          label: `Dial ${query}`,
+          subtitle: 'Direct Number',
+          phoneNumber: query,
+          value: query,
+          fullReplacement: `${cmdName} ${query}`,
+          actionKind: 'call',
+        });
+      } else {
+        const replacement = messageBody
+          ? `${cmdName} ${query} ${messageBody}`
+          : `${cmdName} ${query} `;
+        items.unshift({
+          id: `direct-sms-${cleanQueryDigits}`,
+          type: 'contact',
+          label: `SMS to ${query}`,
+          subtitle: 'Direct Number',
+          phoneNumber: query,
+          value: query,
+          fullReplacement: replacement,
+          actionKind: 'sms',
+        });
+      }
+    }
+  }
+
+  // 7. Command Helper (only if typed exactly "call" or "sms" without trailing space)
+  if (!hasTrailingSpace && !query) {
+    if (mode === 'call') {
+      items.unshift({
+        id: 'cmd-call-help',
+        type: 'command',
+        label: `${cmdName} <number | name>`,
+        subtitle: `Recent Calls & Contacts (${deduplicatedRecent.length} recents, ${(contacts || []).length} contacts)`,
+        value: `${cmdName} `,
+        fullReplacement: `${cmdName} `,
+      });
+    } else {
+      items.unshift({
+        id: 'cmd-sms-help',
+        type: 'command',
+        label: `${cmdName} <contact|number> [message]`,
+        subtitle: `Send SMS via Messaging app (${deduplicatedRecent.length} recents, ${(contacts || []).length} contacts)`,
+        value: `${cmdName} `,
+        fullReplacement: `${cmdName} `,
+      });
+    }
+  }
+
+  return items;
 }
 
 interface CommandLineProps {
@@ -164,7 +355,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         id: `app-open-${a.id}`,
         type: 'app',
         label: a.name,
-        subtitle: `${a.packageName} • [${a.category}]`,
+        subtitle: `[${(a.category || 'app').toUpperCase()}]`,
         value: a.name,
         fullReplacement: `open ${a.name}`,
         appObj: a,
@@ -214,7 +405,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         id: `app-uninstall-${a.id}`,
         type: 'uninstall',
         label: a.name,
-        subtitle: `Remove ${a.packageName}`,
+        subtitle: `Uninstall [${a.name}]`,
         value: a.name,
         fullReplacement: `uninstall ${a.name}`,
         appObj: a,
@@ -241,120 +432,18 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     // 3. Check if user is typing a phone call or dial command: "call" or "dial"
     const callMatch = trimmed.match(/^(call|dial)(\s+(.*))?$/i);
     if (callMatch) {
+      const cmdName = callMatch[1].toLowerCase();
+      const hasTrailingSpace = Boolean(callMatch[2]);
       const query = (callMatch[3] ? callMatch[3].trim() : '').toLowerCase();
-      const cleanDigits = query.replace(/\D/g, '');
-      const items: SuggestionItem[] = [];
 
-      if (!query) {
-        // NO INPUT PROVIDED: The inline suggestions MUST start with the MOST RECENT CALLS!
-        const sortedRecent = [...recentCalls].sort((a, b) => b.timestamp - a.timestamp);
-        
-        sortedRecent.slice(0, 7).forEach((rc) => {
-          const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
-          items.push({
-            id: `recent-${rc.id}`,
-            type: 'contact',
-            label: rc.name,
-            subtitle: `🕒 ${formatTimeAgo(rc.timestamp)} • ${rc.phone} [${typeBadge}${rc.duration ? ` • ${rc.duration}` : ''}]`,
-            phoneNumber: rc.phone,
-            value: rc.phone,
-            fullReplacement: `call ${rc.phone}`,
-            actionKind: 'call',
-          });
-        });
-
-        // Add remaining contacts from directory not present in recent calls
-        const recentPhones = new Set(sortedRecent.map((r) => r.phone.replace(/\D/g, '')));
-        const otherContacts = contacts.filter((c) => !recentPhones.has(c.phone.replace(/\D/g, '')));
-        otherContacts.slice(0, 4).forEach((c) => {
-          items.push({
-            id: `contact-${c.id}`,
-            type: 'contact',
-            label: c.name,
-            subtitle: `${c.phone} • Directory`,
-            phoneNumber: c.phone,
-            value: c.phone,
-            fullReplacement: `call ${c.phone}`,
-            actionKind: 'call',
-          });
-        });
-
-        // If typed exactly "call" with no trailing space, offer command helper at the top
-        if (trimmed.toLowerCase() === 'call' || trimmed.toLowerCase() === 'dial') {
-          items.unshift({
-            id: 'cmd-call',
-            type: 'command',
-            label: `${trimmed.toLowerCase()} <number | name>`,
-            subtitle: `Recent Calls & Dialer (${sortedRecent.length} recents available)`,
-            value: `${trimmed.toLowerCase()} `,
-            fullReplacement: `${trimmed.toLowerCase()} `,
-          });
-        }
-      } else {
-        // QUERY PROVIDED: Prioritize matching recent calls first, then contacts
-        const sortedRecent = [...recentCalls].sort((a, b) => b.timestamp - a.timestamp);
-        const matchingRecent = sortedRecent.filter((rc) => {
-          const nameMatches = rc.name.toLowerCase().includes(query);
-          const phoneClean = rc.phone.replace(/\D/g, '');
-          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
-          return nameMatches || phoneMatches;
-        });
-
-        const seenPhones = new Set<string>();
-
-        matchingRecent.forEach((rc) => {
-          seenPhones.add(rc.phone.replace(/\D/g, ''));
-          const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
-          items.push({
-            id: `recent-match-${rc.id}`,
-            type: 'contact',
-            label: rc.name,
-            subtitle: `🕒 Recent (${formatTimeAgo(rc.timestamp)}) • ${rc.phone} [${typeBadge}]`,
-            phoneNumber: rc.phone,
-            value: rc.phone,
-            fullReplacement: `call ${rc.phone}`,
-            actionKind: 'call',
-          });
-        });
-
-        // Match remaining contacts
-        const matchingContacts = contacts.filter((c) => {
-          const phoneClean = c.phone.replace(/\D/g, '');
-          if (seenPhones.has(phoneClean)) return false;
-          const nameMatches = c.name.toLowerCase().includes(query);
-          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
-          const emailMatches = c.email.toLowerCase().includes(query);
-          return nameMatches || phoneMatches || emailMatches;
-        });
-
-        matchingContacts.forEach((c) => {
-          seenPhones.add(c.phone.replace(/\D/g, ''));
-          items.push({
-            id: `contact-match-${c.id}`,
-            type: 'contact',
-            label: c.name,
-            subtitle: `${c.phone} • Directory`,
-            phoneNumber: c.phone,
-            value: c.phone,
-            fullReplacement: `call ${c.phone}`,
-            actionKind: 'call',
-          });
-        });
-
-        // If user typed custom digits and not already an exact match
-        if (cleanDigits.length >= 3 && !seenPhones.has(cleanDigits)) {
-          items.unshift({
-            id: `direct-dial-${cleanDigits}`,
-            type: 'contact',
-            label: `Dial ${query}`,
-            subtitle: 'Direct Number',
-            phoneNumber: query,
-            value: query,
-            fullReplacement: `call ${query}`,
-            actionKind: 'call',
-          });
-        }
-      }
+      const items = buildContactSuggestions({
+        mode: 'call',
+        cmdName,
+        query,
+        recentCalls,
+        contacts,
+        hasTrailingSpace,
+      });
 
       setSuggestions(items);
       setSelectedSuggestionIdx(0);
@@ -366,72 +455,34 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     const smsMatch = trimmed.match(/^(sms|msg|message)(\s+(.*))?$/i);
     if (smsMatch) {
       const smsCmd = smsMatch[1].toLowerCase();
+      const hasTrailingSpace = Boolean(smsMatch[2]);
       const rawArg = smsMatch[3] ? smsMatch[3].trim() : '';
-      const parts = rawArg.split(/\s+/);
-      const recipientQuery = parts[0] ? parts[0].toLowerCase() : '';
-      const cleanDigits = recipientQuery.replace(/\D/g, '');
-      const messageBody = parts.slice(1).join(' ');
-      const items: SuggestionItem[] = [];
 
-      if (!recipientQuery) {
-        items.push({
-          id: 'cmd-sms-help',
-          type: 'command',
-          label: `${smsCmd} <contact|number> [message]`,
-          subtitle: 'Send SMS via native Messaging app',
-          value: `${smsCmd} `,
-          fullReplacement: `${smsCmd} `,
-        });
-
-        contacts.slice(0, 7).forEach((c) => {
-          items.push({
-            id: `sms-contact-${c.id}`,
-            type: 'contact',
-            label: c.name,
-            subtitle: `✉️ ${c.phone} • Compose SMS`,
-            phoneNumber: c.phone,
-            value: c.phone,
-            fullReplacement: `${smsCmd} "${c.name}" `,
-          });
-        });
-      } else {
-        const matchingContacts = contacts.filter((c) => {
-          const nameMatches = c.name.toLowerCase().includes(recipientQuery);
-          const phoneClean = c.phone.replace(/\D/g, '');
-          const phoneMatches = cleanDigits.length > 0 && phoneClean.includes(cleanDigits);
-          return nameMatches || phoneMatches;
-        });
-
-        matchingContacts.forEach((c) => {
-          const replacement = messageBody
-            ? `${smsCmd} "${c.name}" ${messageBody}`
-            : `${smsCmd} "${c.name}" `;
-          items.push({
-            id: `sms-contact-match-${c.id}`,
-            type: 'contact',
-            label: c.name,
-            subtitle: `✉️ ${c.phone} • Directory`,
-            phoneNumber: c.phone,
-            value: c.phone,
-            fullReplacement: replacement,
-          });
-        });
-
-        if (cleanDigits.length >= 3) {
-          const replacement = messageBody
-            ? `${smsCmd} ${recipientQuery} ${messageBody}`
-            : `${smsCmd} ${recipientQuery} `;
-          items.unshift({
-            id: `sms-direct-${cleanDigits}`,
-            type: 'contact',
-            label: `SMS to ${recipientQuery}`,
-            subtitle: 'Direct Number',
-            phoneNumber: recipientQuery,
-            value: recipientQuery,
-            fullReplacement: replacement,
-          });
+      let recipientQuery = '';
+      let messageBody = '';
+      if (rawArg.startsWith('"')) {
+        const closingQuoteIdx = rawArg.indexOf('"', 1);
+        if (closingQuoteIdx !== -1) {
+          recipientQuery = rawArg.substring(1, closingQuoteIdx).trim().toLowerCase();
+          messageBody = rawArg.substring(closingQuoteIdx + 1).trim();
+        } else {
+          recipientQuery = rawArg.substring(1).trim().toLowerCase();
         }
+      } else {
+        const parts = rawArg.split(/\s+/);
+        recipientQuery = parts[0] ? parts[0].toLowerCase() : '';
+        messageBody = parts.slice(1).join(' ');
       }
+
+      const items = buildContactSuggestions({
+        mode: 'sms',
+        cmdName: smsCmd,
+        query: recipientQuery,
+        messageBody,
+        recentCalls,
+        contacts,
+        hasTrailingSpace,
+      });
 
       setSuggestions(items);
       setSelectedSuggestionIdx(0);
@@ -754,7 +805,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         if (matchedApp) {
           type = 'app';
           actionKind = 'open';
-          subtitle = `${matchedApp.packageName} • [Launch Direct]`;
+          subtitle = `[${(matchedApp.category || 'app').toUpperCase()}] • Direct Launch`;
         } else if (scripts.some((s) => s.name === m)) {
           type = 'file';
           subtitle = 'Shell Script';
@@ -1040,7 +1091,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
     }
   };
 
-  const isCallActive = input.trimStart().toLowerCase().startsWith('call') || input.trimStart().toLowerCase().startsWith('dial');
+  const isCallActive = Boolean(input.trimStart().match(/^(call|dial)(\s|$)/i));
+  const isSmsActive = Boolean(input.trimStart().match(/^(sms|msg|message)(\s|$)/i));
   const isOpenActive = input.trimStart().toLowerCase().startsWith('open') || input.trimStart().toLowerCase().startsWith('launch');
   const isUninstallActive = input.trimStart().toLowerCase().startsWith('uninstall') || input.trimStart().toLowerCase().startsWith('remove-app');
   const isBtActive = input.trimStart().toLowerCase().startsWith('bluetooth') || input.trimStart().toLowerCase().startsWith('bt') || input.trimStart().toLowerCase().startsWith('bluetoothctl') || input.trimStart().toLowerCase().startsWith('bluez');
@@ -1051,7 +1103,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
       {showSuggestions && suggestions.length > 0 && (
         <div
           id="autocomplete-suggestions"
-          className="absolute bottom-full left-0 right-0 sm:left-4 sm:right-auto max-h-64 overflow-y-auto mb-2 sm:max-w-xl bg-opacity-95 backdrop-blur-md rounded border shadow-2xl p-2 z-30 flex flex-col gap-1.5"
+          className="absolute bottom-full left-0 right-0 sm:left-4 sm:right-auto max-h-64 overflow-y-auto overflow-x-hidden mb-2 w-full max-w-full sm:max-w-xl bg-opacity-95 backdrop-blur-md rounded border shadow-2xl p-2 z-30 flex flex-col gap-1.5 box-border"
           style={{
             backgroundColor: theme.cardBg,
             borderColor: theme.borderColor,
@@ -1070,6 +1122,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                 <Trash2 size={11} className="text-red-400" />
               ) : isCallActive ? (
                 <Phone size={11} className="text-emerald-400" />
+              ) : isSmsActive ? (
+                <MessageSquare size={11} className="text-violet-400" />
               ) : isBtActive ? (
                 <Bluetooth size={11} className="text-blue-400 animate-pulse" />
               ) : (
@@ -1081,7 +1135,9 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   : isUninstallActive
                   ? 'Package Uninstaller • Tap [Uninstall] or [Tab]'
                   : isCallActive
-                  ? 'Dialer & Recent Calls • [Tab] Complete or Tap [Call]'
+                  ? 'Phone Dialer & Contacts • [Tab] Complete or Tap [Call]'
+                  : isSmsActive
+                  ? 'SMS Messenger • [Tab] Complete or Tap [SMS]'
                   : isBtActive
                   ? 'Bluetooth Manager • [Tab] Complete or Tap [Connect]'
                   : 'Inline Suggestions'}
@@ -1091,7 +1147,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
           </div>
 
           {/* Suggestions List */}
-          <div className="flex flex-wrap sm:flex-col gap-1.5 max-h-52 overflow-y-auto">
+          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto overflow-x-hidden w-full max-w-full">
             {suggestions.map((item, idx) => {
               const isSelected = idx === selectedSuggestionIdx;
               const isRecent = item.id.startsWith('recent-') || (item.subtitle && item.subtitle.includes('🕒'));
@@ -1106,7 +1162,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   key={item.id}
                   id={`suggestion-${item.id}`}
                   onClick={() => applySuggestion(item)}
-                  className={`group px-2.5 py-1.5 text-xs rounded border transition-all flex items-center justify-between gap-2 cursor-pointer ${
+                  className={`group px-2.5 py-1.5 text-xs rounded border transition-all flex items-center justify-between gap-2 cursor-pointer w-full max-w-full box-border overflow-hidden ${
                     isSelected ? 'ring-1' : ''
                   }`}
                   style={{
@@ -1115,7 +1171,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                     color: theme.fg,
                   }}
                 >
-                  <div className="flex items-center gap-2 min-w-0 overflow-hidden">
+                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
                     <div
                       className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-[10px]"
                       style={{
@@ -1123,6 +1179,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           ? `${theme.errorColor}25`
                           : isRecent
                           ? `${theme.successColor}35`
+                          : (isSmsActive || item.actionKind === 'sms')
+                          ? '#8b5cf630'
                           : isContact
                           ? `${theme.successColor}25`
                           : isApp
@@ -1134,6 +1192,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           ? theme.errorColor
                           : isRecent
                           ? theme.successColor
+                          : (isSmsActive || item.actionKind === 'sms')
+                          ? '#a78bfa'
                           : isContact
                           ? theme.successColor
                           : isApp
@@ -1147,6 +1207,8 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                         <Trash2 size={11} />
                       ) : isRecent ? (
                         <Clock size={11} />
+                      ) : (isSmsActive || item.actionKind === 'sms') ? (
+                        <MessageSquare size={11} />
                       ) : isContact ? (
                         <User size={11} />
                       ) : isApp ? (
@@ -1162,15 +1224,15 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                       )}
                     </div>
 
-                    <div className="flex flex-col min-w-0">
+                    <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
                       <span
-                        className="font-bold truncate text-xs"
+                        className="font-bold truncate text-xs block"
                         style={{ color: isSelected ? theme.accentColor : theme.fg }}
                       >
                         {item.label}
                       </span>
                       {item.subtitle && (
-                        <span className="text-[10px] opacity-65 truncate font-mono">
+                        <span className="text-[10px] opacity-65 truncate font-mono block">
                           {item.subtitle}
                         </span>
                       )}
@@ -1178,7 +1240,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   </div>
 
                   {/* Right side quick action buttons */}
-                  <div className="flex items-center gap-1 shrink-0">
+                  <div className="flex items-center gap-1 shrink-0 ml-2">
                     {isApp && item.appObj && (
                       <button
                         type="button"
@@ -1219,15 +1281,35 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                       </button>
                     )}
 
-                    {isContact && item.phoneNumber && (
+                    {isContact && (item.actionKind === 'sms' || isSmsActive) && (
                       <button
                         type="button"
-                        title={`Call ${item.phoneNumber} immediately`}
+                        title={`Send SMS to ${item.label}`}
                         onClick={(e) => {
                           e.stopPropagation();
-                          directExecute(item.fullReplacement || `call ${item.phoneNumber}`);
+                          directExecute(item.fullReplacement || `sms "${item.label}" `);
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all"
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 ml-2 whitespace-nowrap"
+                        style={{
+                          backgroundColor: '#8b5cf625',
+                          borderColor: '#8b5cf6',
+                          color: '#a78bfa',
+                        }}
+                      >
+                        <MessageSquare size={9} />
+                        <span>SMS</span>
+                      </button>
+                    )}
+
+                    {isContact && item.actionKind !== 'sms' && !isSmsActive && (item.phoneNumber || item.label) && (
+                      <button
+                        type="button"
+                        title={`Call ${item.label} immediately`}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          directExecute(item.fullReplacement || `call ${item.phoneNumber || item.label}`);
+                        }}
+                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 ml-2 whitespace-nowrap"
                         style={{
                           backgroundColor: `${theme.successColor}25`,
                           borderColor: theme.successColor,

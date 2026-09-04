@@ -533,12 +533,41 @@ export const DefaultLauncherModal: React.FC<DefaultLauncherModalProps> = ({
                 </div>
 
                 <p className="text-[11px] opacity-90 leading-relaxed">
-                  For the cleanest full-screen terminal experience, <strong>Gesture Navigation</strong> is enforced over 3-button navigation. This removes the Back, Home, and Recents bar, giving maximum vertical space to your terminal prompt and tabs.
+                  For the cleanest full-screen terminal experience, <strong>Gesture Navigation</strong> is recommended over 3-button navigation. This removes the navigation bar, maximizing vertical screen real estate for your terminal prompt and tabs.
                 </p>
 
+                {/* Third-party Launcher OEM Restriction Note & Solutions */}
+                <div
+                  className="p-3 rounded-lg border text-[11px] space-y-2 font-mono"
+                  style={{ borderColor: theme.borderColor, backgroundColor: `${theme.bg}ee` }}
+                >
+                  <div className="font-bold text-xs flex items-center gap-1.5" style={{ color: theme.accentColor }}>
+                    <span>📱 WHY DO GESTURES DISABLE ON SOME PHONES?</span>
+                  </div>
+                  <p className="text-[10px] opacity-80 leading-relaxed">
+                    Certain OEM skins (especially <strong>Xiaomi HyperOS / MIUI</strong>, <strong>Huawei EMUI</strong>, and older <strong>OneUI</strong> builds) intentionally restrict native gestures when selecting any 3rd-party launcher, reverting to 3 buttons.
+                  </p>
+
+                  <div className="space-y-1 text-[10px]">
+                    <div className="font-bold text-emerald-400">Solution 1: Force System Gestures via ADB (Pixel, Samsung, Moto, OnePlus)</div>
+                    <code className="block p-1.5 rounded bg-black/60 border border-neutral-800 text-neutral-200 select-all break-all">
+                      adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural<br />
+                      adb shell settings put secure navigation_mode 2
+                    </code>
+                  </div>
+
+                  <div className="space-y-1 text-[10px]">
+                    <div className="font-bold text-amber-400">Solution 2: Xiaomi / HyperOS / OEM-Locked ROMs</div>
+                    <p className="opacity-80">
+                      • <strong>In TUI Launcher:</strong> The 3 buttons are automatically hidden via sticky immersive mode, giving you a full-screen view inside this launcher.<br />
+                      • <strong>System-wide Gestures:</strong> Install <strong className="text-white">Fluid Navigation Gestures (FNG)</strong> or <strong className="text-white">Edge Gestures</strong> from the Play Store. These apps provide full edge gestures across all apps, completely bypassing Xiaomi's launcher lock!
+                    </p>
+                  </div>
+                </div>
+
                 <div className="text-[11px] opacity-80 space-y-1">
-                  <p>• <strong>Swipe Left / Right:</strong> Swipe horizontally anywhere across the screen to switch between <strong>Apps</strong>, <strong>Notifications</strong>, and <strong>Terminal</strong> sections.</p>
-                  <p>• <strong>Automatic Setup via ADB:</strong> Run <code className="text-emerald-400 bg-black/40 px-1 py-0.5 rounded font-mono">adb shell pm grant com.android.terminal.launcher android.permission.WRITE_SECURE_SETTINGS</code> for 1-click automatic system-wide gesture switching.</p>
+                  <p>• <strong>Smooth Tab Transitions:</strong> Swipe horizontally anywhere across the screen to glide between <strong>Apps</strong>, <strong>Notifications</strong>, and <strong>Terminal</strong> sections.</p>
+                  <p>• <strong>Permission Grant via ADB:</strong> <code className="text-emerald-400 bg-black/40 px-1 py-0.5 rounded font-mono">adb shell pm grant com.android.terminal.launcher android.permission.WRITE_SECURE_SETTINGS</code></p>
                 </div>
               </div>
 

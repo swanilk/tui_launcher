@@ -316,13 +316,16 @@ Target Mode: ${enable ? 'Full Screen Gesture Navigation (3-Button Bar Hidden)' :
 Swiping Navigation:
   • Swipe LEFT anywhere on screen ➔ Next section (Apps ➔ Notifs ➔ Term)
   • Swipe RIGHT anywhere on screen ➔ Previous section (Term ➔ Notifs ➔ Apps)
+  • GPU-accelerated smooth slide transitions active!
 
-System Settings:
-  • To permanently switch system-wide navigation mode:
-    Android Settings ➔ System ➔ Gestures ➔ System navigation ➔ Gesture navigation.
-  • Or via ADB:
+OEM & Third-Party Launcher Compatibility:
+  • Pixel / Samsung / Motorola / OnePlus / Sony:
     adb shell cmd overlay enable com.android.internal.systemui.navbar.gestural
-    adb shell settings put secure navigation_mode 2`,
+    adb shell settings put secure navigation_mode 2
+  • Xiaomi / HyperOS / MIUI:
+    Xiaomi restricts system gestures for third-party launchers. Install "Fluid Navigation Gestures (FNG)" or "Edge Gestures" to enjoy edge swipe gestures across all apps!
+  • Inside TUI Launcher:
+    The 3-button navigation bar is automatically hidden in sticky immersive mode.`,
         };
       }
 
@@ -1074,14 +1077,16 @@ Conversation opened in your phone's Messaging app.`,
       case 'android16': {
         return {
           type: 'output',
-          content: `🤖 Android OS Platform Version:
+          content: `📱 Android Terminal Launcher (TUI) v1.3
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Android OS Platform:
   Version:       Android 16 (Baklava)
   API Level:     36
   Build ID:      AP4A.260901.001.A1
   Kernel:        6.12.0-android16-aarch64
   Security Patch: 2026-09-01
   Architecture:  arm64-v8a (16KB page alignment)
-  Features:      Predictive Back, Edge-to-Edge, 165Hz Display Sync, Hardware TUI`,
+  Features:      Full Screen Gestures, Smooth Slide Pager, Contact Quick-Dial / SMS, Hardware TUI`,
         };
       }
 
@@ -1909,7 +1914,7 @@ Tip: Change values with: config set <key> <value> (e.g. config set crtEffect tru
      \\  -  /      Host: ${host}
       '---'       CPU: ${cores} (${ramStr})
     /|     |\\     Uptime: ${uptimeStr}
-   / |     | \\    Shell: termux-sh 5.3 (Android TUI)
+   / |     | \\    Shell: termux-sh 5.3 (Android TUI v1.3)
   /  |_____|  \\   Display: ${screenW}x${screenH} @ ${dpr}x DPR
      |     |      Battery: ${ctx.batteryLevel}% [${ctx.isCharging ? '⚡ Charging' : 'Discharging'}]
      |  |  |      Network: ${netStatus} (${ctx.wifiSsid})
