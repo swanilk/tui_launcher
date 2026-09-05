@@ -1761,6 +1761,15 @@ Commands:
       ? ctx.contacts.filter((c) => c.name.toLowerCase().includes(query) || c.phone.includes(query))
       : ctx.contacts;
 
+    if (filtered.length === 0) {
+      return {
+        type: 'output',
+        content: query
+          ? `[ℹ] No contacts matching '${query}'.`
+          : `👥 Android Contacts Directory (0 contacts):\n  No contacts saved.\n\nTip: Add one with 'contact add <name> <phone>' or install the native APK on your phone to automatically sync device contacts.`,
+      };
+    }
+
     const list = filtered.map((c) => `  👤 ${c.name.padEnd(24)} 📞 ${c.phone.padEnd(18)} ✉️ ${c.email}`).join('\n');
     return { type: 'output', content: `👥 Android Contacts Directory (${filtered.length}):\n${list}` };
   }

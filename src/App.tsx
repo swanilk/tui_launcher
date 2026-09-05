@@ -383,7 +383,15 @@ export default function App() {
   const [contacts, setContacts] = useState<ContactItem[]>(() => {
     try {
       const stored = localStorage.getItem('android_tui_contacts');
-      return stored ? JSON.parse(stored) : DEFAULT_CONTACTS;
+      if (stored) {
+        const parsed: ContactItem[] = JSON.parse(stored);
+        return parsed.filter(
+          (c) =>
+            !c.phone?.includes('555-') &&
+            !['c-mom', 'c-alice', 'c-bob', 'c-charlie', 'c-david', 'c-emma', 'c-work', 'c-emergency'].includes(c.id)
+        );
+      }
+      return DEFAULT_CONTACTS;
     } catch {
       return DEFAULT_CONTACTS;
     }
@@ -399,7 +407,15 @@ export default function App() {
   const [recentCalls, setRecentCalls] = useState<RecentCall[]>(() => {
     try {
       const stored = localStorage.getItem('android_tui_recent_calls');
-      return stored ? JSON.parse(stored) : DEFAULT_RECENT_CALLS;
+      if (stored) {
+        const parsed: RecentCall[] = JSON.parse(stored);
+        return parsed.filter(
+          (r) =>
+            !r.phone?.includes('555-') &&
+            !['rc-1', 'rc-2', 'rc-3', 'rc-4'].includes(r.id)
+        );
+      }
+      return DEFAULT_RECENT_CALLS;
     } catch {
       return DEFAULT_RECENT_CALLS;
     }

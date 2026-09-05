@@ -53,9 +53,33 @@ export interface SuggestionItem {
   fullReplacement?: string;
   subtitle?: string;
   phoneNumber?: string;
+  contactSource?: 'recent' | 'directory' | 'direct';
+  callType?: 'incoming' | 'outgoing' | 'missed';
+  callTime?: string;
+  callDuration?: string;
   appObj?: AndroidApp;
   bluetoothDevice?: BluetoothDevice;
   actionKind?: 'open' | 'uninstall' | 'call' | 'sms' | 'exec' | 'bluetooth_connect' | 'bluetooth_toggle';
+}
+
+function phonesMatch(p1?: string, p2?: string): boolean {
+  if (!p1 || !p2) return false;
+  const d1 = p1.replace(/\D/g, '');
+  const d2 = p2.replace(/\D/g, '');
+  if (!d1 || !d2) return false;
+  if (d1 === d2) return true;
+  if (d1.length >= 7 && d2.length >= 7) {
+    const minLen = Math.min(d1.length, d2.length, 10);
+    return d1.slice(-minLen) === d2.slice(-minLen);
+  }
+  return false;
+}
+
+function namesMatch(n1?: string, n2?: string): boolean {
+  if (!n1 || !n2) return false;
+  const t1 = n1.trim().toLowerCase();
+  const t2 = n2.trim().toLowerCase();
+  return t1.length > 0 && t1 === t2;
 }
 
 /**
@@ -84,15 +108,15 @@ function buildContactSuggestions({
   // 1. Sort recent calls by timestamp descending (newest calls first)
   const sortedRecent = [...(recentCalls || [])].sort((a, b) => b.timestamp - a.timestamp);
 
-  // 2. Deduplicate recent calls by phone digits / name so each unique person appears once with their newest call
-  const seenKeys = new Set<string>();
+  // 2. Deduplicate recent calls so each unique contact/number appears once with their most recent call
   const deduplicatedRecent: RecentCall[] = [];
   for (const rc of sortedRecent) {
-    const cleanPhone = rc.phone ? rc.phone.replace(/\D/g, '') : '';
-    const key = cleanPhone.length >= 4 ? cleanPhone : (rc.name || '').toLowerCase().trim();
-    if (!key || seenKeys.has(key)) continue;
-    seenKeys.add(key);
-    deduplicatedRecent.push(rc);
+    const exists = deduplicatedRecent.some((prev) =>
+      phonesMatch(prev.phone, rc.phone) || (rc.name && namesMatch(prev.name, rc.name))
+    );
+    if (!exists) {
+      deduplicatedRecent.push(rc);
+    }
   }
 
   // 3. Filter matching recent contacts
@@ -106,22 +130,21 @@ function buildContactSuggestions({
 
   // 4. Add recent called contacts to suggestions FIRST
   matchingRecent.forEach((rc) => {
-    const dirMatch = (contacts || []).find((c) => {
-      const cClean = c.phone ? c.phone.replace(/\D/g, '') : '';
-      const rcClean = rc.phone ? rc.phone.replace(/\D/g, '') : '';
-      return (cClean.length >= 4 && cClean === rcClean) || (c.name && rc.name && c.name.toLowerCase() === rc.name.toLowerCase());
-    });
+    const dirMatch = (contacts || []).find((c) =>
+      phonesMatch(c.phone, rc.phone) || namesMatch(c.name, rc.name)
+    );
 
-    const displayName = rc.name && rc.name !== rc.phone ? rc.name : dirMatch?.name || rc.name || rc.phone;
+    const displayName = rc.name && rc.name !== rc.phone ? rc.name : (dirMatch?.name || rc.name || rc.phone);
     const phoneStr = rc.phone || dirMatch?.phone || '';
     const timeStr = formatTimeAgo(rc.timestamp);
+    const typeBadge = rc.type === 'missed' ? 'Missed' : rc.type === 'incoming' ? 'Incoming' : 'Outgoing';
 
     let subtitle = '';
     if (mode === 'call') {
-      const typeBadge = rc.type === 'missed' ? 'MISSED' : rc.type === 'incoming' ? 'INCOMING' : 'OUTGOING';
-      subtitle = `🕒 Recent (${timeStr}) • ${phoneStr} [${typeBadge}${rc.duration ? ` • ${rc.duration}` : ''}]`;
+      const durationStr = rc.duration ? `(${rc.duration}) ` : '';
+      subtitle = `${typeBadge} ${durationStr}• ${timeStr}`;
     } else {
-      subtitle = `🕒 Recent (${timeStr}) • ${phoneStr}`;
+      subtitle = `Recent • ${timeStr}`;
     }
 
     let fullReplacement = '';
@@ -140,6 +163,10 @@ function buildContactSuggestions({
       label: displayName,
       subtitle,
       phoneNumber: phoneStr,
+      contactSource: 'recent',
+      callType: rc.type,
+      callTime: timeStr,
+      callDuration: rc.duration,
       value: displayName,
       fullReplacement,
       actionKind: mode,
@@ -148,9 +175,10 @@ function buildContactSuggestions({
 
   // 5. Add remaining contacts from directory not present in recent calls, sorted alphabetically
   const remainingContacts = (contacts || []).filter((c) => {
-    const clean = c.phone ? c.phone.replace(/\D/g, '') : '';
-    const key = clean.length >= 4 ? clean : c.name.toLowerCase().trim();
-    return !seenKeys.has(key);
+    const inRecent = deduplicatedRecent.some((rc) =>
+      phonesMatch(c.phone, rc.phone) || namesMatch(c.name, rc.name)
+    );
+    return !inRecent;
   });
 
   remainingContacts.sort((a, b) => a.name.localeCompare(b.name));
@@ -165,7 +193,8 @@ function buildContactSuggestions({
   });
 
   matchingDir.forEach((c) => {
-    const subtitle = mode === 'call' ? `${c.phone} • Directory` : `✉️ ${c.phone} • Directory`;
+    const subtitle = c.email && !c.email.includes('@example.com') ? c.email : 'Phone Directory';
+
     let fullReplacement = '';
     if (mode === 'call') {
       const quoteNeeded = c.name.includes(' ');
@@ -182,6 +211,7 @@ function buildContactSuggestions({
       label: c.name,
       subtitle,
       phoneNumber: c.phone,
+      contactSource: 'directory',
       value: c.name,
       fullReplacement,
       actionKind: mode,
@@ -197,8 +227,9 @@ function buildContactSuggestions({
           id: `direct-dial-${cleanQueryDigits}`,
           type: 'contact',
           label: `Dial ${query}`,
-          subtitle: 'Direct Number',
+          subtitle: 'Direct phone number',
           phoneNumber: query,
+          contactSource: 'direct',
           value: query,
           fullReplacement: `${cmdName} ${query}`,
           actionKind: 'call',
@@ -211,8 +242,9 @@ function buildContactSuggestions({
           id: `direct-sms-${cleanQueryDigits}`,
           type: 'contact',
           label: `SMS to ${query}`,
-          subtitle: 'Direct Number',
+          subtitle: 'Direct phone number',
           phoneNumber: query,
+          contactSource: 'direct',
           value: query,
           fullReplacement: replacement,
           actionKind: 'sms',
@@ -221,14 +253,20 @@ function buildContactSuggestions({
     }
   }
 
-  // 7. Command Helper (only if typed exactly "call" or "sms" without trailing space)
+  // 7. Command Helper: ONLY when user typed exactly "call" or "sms" without space
   if (!hasTrailingSpace && !query) {
+    const contactCount = (contacts || []).length;
+    const recentCount = deduplicatedRecent.length;
+    const totalCount = contactCount + recentCount;
+
     if (mode === 'call') {
       items.unshift({
         id: 'cmd-call-help',
         type: 'command',
         label: `${cmdName} <number | name>`,
-        subtitle: `Recent Calls & Contacts (${deduplicatedRecent.length} recents, ${(contacts || []).length} contacts)`,
+        subtitle: totalCount > 0
+          ? `Press Space to browse recent calls (${recentCount}) & contacts (${contactCount})`
+          : 'Initiate phone call via Android Phone app',
         value: `${cmdName} `,
         fullReplacement: `${cmdName} `,
       });
@@ -237,7 +275,9 @@ function buildContactSuggestions({
         id: 'cmd-sms-help',
         type: 'command',
         label: `${cmdName} <contact|number> [message]`,
-        subtitle: `Send SMS via Messaging app (${deduplicatedRecent.length} recents, ${(contacts || []).length} contacts)`,
+        subtitle: totalCount > 0
+          ? `Press Space to browse recent calls (${recentCount}) & contacts (${contactCount})`
+          : 'Send SMS via Messaging app',
         value: `${cmdName} `,
         fullReplacement: `${cmdName} `,
       });
@@ -1112,45 +1152,47 @@ export const CommandLine: React.FC<CommandLineProps> = ({
         >
           {/* Header */}
           <div
-            className="w-full text-[10px] uppercase font-bold opacity-75 px-1 flex items-center justify-between border-b pb-1 mb-0.5"
+            className="w-full text-[10px] uppercase font-bold opacity-75 px-1 flex items-center justify-between border-b pb-1 mb-1 gap-2"
             style={{ borderColor: theme.borderColor }}
           >
-            <span className="flex items-center gap-1.5">
+            <span className="flex items-center gap-1.5 min-w-0 truncate">
               {isOpenActive ? (
-                <AppWindow size={11} className="text-cyan-400" />
+                <AppWindow size={11} className="text-cyan-400 shrink-0" />
               ) : isUninstallActive ? (
-                <Trash2 size={11} className="text-red-400" />
+                <Trash2 size={11} className="text-red-400 shrink-0" />
               ) : isCallActive ? (
-                <Phone size={11} className="text-emerald-400" />
+                <Phone size={11} className="text-emerald-400 shrink-0" />
               ) : isSmsActive ? (
-                <MessageSquare size={11} className="text-violet-400" />
+                <MessageSquare size={11} className="text-violet-400 shrink-0" />
               ) : isBtActive ? (
-                <Bluetooth size={11} className="text-blue-400 animate-pulse" />
+                <Bluetooth size={11} className="text-blue-400 animate-pulse shrink-0" />
               ) : (
-                <Sparkles size={11} />
+                <Sparkles size={11} className="shrink-0" />
               )}
-              <span>
-                {isOpenActive
-                  ? 'Application Launcher • [Tab] Complete or Tap [Launch]'
-                  : isUninstallActive
-                  ? 'Package Uninstaller • Tap [Uninstall] or [Tab]'
-                  : isCallActive
-                  ? 'Phone Dialer & Contacts • [Tab] Complete or Tap [Call]'
+              <span className="truncate">
+                {isCallActive
+                  ? 'Phone Contacts & Recents'
                   : isSmsActive
-                  ? 'SMS Messenger • [Tab] Complete or Tap [SMS]'
+                  ? 'SMS Contacts & Recents'
+                  : isOpenActive
+                  ? 'Application Launcher'
+                  : isUninstallActive
+                  ? 'Package Uninstaller'
                   : isBtActive
-                  ? 'Bluetooth Manager • [Tab] Complete or Tap [Connect]'
+                  ? 'Bluetooth Manager'
                   : 'Inline Suggestions'}
               </span>
             </span>
-            <span className="text-[9px] opacity-60 font-mono">[Tab] / [→] autocomplete • [Enter] run</span>
+            <span className="text-[9px] opacity-60 font-mono shrink-0 whitespace-nowrap">
+              [Tab] select • [Enter] run
+            </span>
           </div>
 
           {/* Suggestions List */}
-          <div className="flex flex-col gap-1.5 max-h-52 overflow-y-auto overflow-x-hidden w-full max-w-full">
+          <div className="flex flex-col gap-1.5 max-h-56 overflow-y-auto overflow-x-hidden w-full max-w-full pr-0.5">
             {suggestions.map((item, idx) => {
               const isSelected = idx === selectedSuggestionIdx;
-              const isRecent = item.id.startsWith('recent-') || (item.subtitle && item.subtitle.includes('🕒'));
+              const isRecent = item.id.startsWith('recent-') || item.contactSource === 'recent' || (item.subtitle && item.subtitle.includes('🕒'));
               const isContact = item.type === 'contact';
               const isApp = item.type === 'app';
               const isUninstall = item.type === 'uninstall';
@@ -1162,7 +1204,7 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                   key={item.id}
                   id={`suggestion-${item.id}`}
                   onClick={() => applySuggestion(item)}
-                  className={`group px-2.5 py-1.5 text-xs rounded border transition-all flex items-center justify-between gap-2 cursor-pointer w-full max-w-full box-border overflow-hidden ${
+                  className={`group px-2.5 py-2 text-xs rounded border transition-all flex items-center justify-between gap-2.5 cursor-pointer w-full max-w-full box-border shrink-0 min-h-[44px] ${
                     isSelected ? 'ring-1' : ''
                   }`}
                   style={{
@@ -1171,18 +1213,18 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                     color: theme.fg,
                   }}
                 >
-                  <div className="flex items-center gap-2 min-w-0 flex-1 overflow-hidden">
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1 overflow-hidden">
                     <div
-                      className="w-5 h-5 rounded flex items-center justify-center shrink-0 text-[10px]"
+                      className="w-6 h-6 rounded flex items-center justify-center shrink-0 text-[10px]"
                       style={{
                         backgroundColor: isUninstall
                           ? `${theme.errorColor}25`
-                          : isRecent
-                          ? `${theme.successColor}35`
+                          : isRecent || item.contactSource === 'recent'
+                          ? `${theme.successColor}30`
                           : (isSmsActive || item.actionKind === 'sms')
                           ? '#8b5cf630'
                           : isContact
-                          ? `${theme.successColor}25`
+                          ? `${theme.promptColor}20`
                           : isApp
                           ? `${theme.infoColor}25`
                           : isBluetooth
@@ -1190,12 +1232,12 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           : `${theme.accentColor}25`,
                         color: isUninstall
                           ? theme.errorColor
-                          : isRecent
+                          : isRecent || item.contactSource === 'recent'
                           ? theme.successColor
                           : (isSmsActive || item.actionKind === 'sms')
                           ? '#a78bfa'
                           : isContact
-                          ? theme.successColor
+                          ? theme.promptColor
                           : isApp
                           ? theme.infoColor
                           : isBluetooth
@@ -1204,43 +1246,107 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                       }}
                     >
                       {isUninstall ? (
-                        <Trash2 size={11} />
-                      ) : isRecent ? (
-                        <Clock size={11} />
+                        <Trash2 size={12} />
+                      ) : isRecent || item.contactSource === 'recent' ? (
+                        <Clock size={12} />
                       ) : (isSmsActive || item.actionKind === 'sms') ? (
-                        <MessageSquare size={11} />
+                        <MessageSquare size={12} />
                       ) : isContact ? (
-                        <User size={11} />
+                        <User size={12} />
                       ) : isApp ? (
-                        <AppWindow size={11} />
+                        <AppWindow size={12} />
                       ) : isBluetooth ? (
                         item.bluetoothDevice?.connected ? (
-                          <BluetoothConnected size={11} />
+                          <BluetoothConnected size={12} />
                         ) : (
-                          <Bluetooth size={11} />
+                          <Bluetooth size={12} />
                         )
                       ) : (
-                        <Terminal size={11} />
+                        <Terminal size={12} />
                       )}
                     </div>
 
-                    <div className="flex flex-col min-w-0 flex-1 overflow-hidden">
-                      <span
-                        className="font-bold truncate text-xs block"
-                        style={{ color: isSelected ? theme.accentColor : theme.fg }}
-                      >
-                        {item.label}
-                      </span>
-                      {item.subtitle && (
-                        <span className="text-[10px] opacity-65 truncate font-mono block">
-                          {item.subtitle}
+                    {isContact ? (
+                      <div className="flex flex-col min-w-0 flex-1 justify-center gap-0.5 overflow-hidden">
+                        {/* Line 1: Contact Name + Type Badge */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="font-bold truncate text-xs leading-none"
+                            style={{ color: isSelected ? theme.accentColor : theme.fg }}
+                          >
+                            {item.label}
+                          </span>
+                          {item.contactSource === 'recent' || isRecent ? (
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium shrink-0 leading-none"
+                              style={{
+                                backgroundColor: `${theme.successColor}25`,
+                                borderColor: `${theme.successColor}50`,
+                                color: theme.successColor,
+                                borderWidth: '1px',
+                              }}
+                            >
+                              {item.callType === 'missed' ? '🔴 Missed' : item.callType === 'incoming' ? '🔵 In' : '🟢 Recent'}
+                            </span>
+                          ) : item.contactSource === 'direct' || item.id.startsWith('direct-') ? (
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium shrink-0 leading-none"
+                              style={{
+                                backgroundColor: `${theme.infoColor}25`,
+                                borderColor: `${theme.infoColor}50`,
+                                color: theme.infoColor,
+                                borderWidth: '1px',
+                              }}
+                            >
+                              Direct
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[9px] px-1.5 py-0.5 rounded font-mono font-medium shrink-0 opacity-65 leading-none"
+                              style={{
+                                backgroundColor: `${theme.borderColor}30`,
+                                borderColor: theme.borderColor,
+                                borderWidth: '1px',
+                              }}
+                            >
+                              Contact
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Line 2: Phone number and Call info */}
+                        <div className="flex items-center gap-1.5 text-[10px] font-mono opacity-80 min-w-0 leading-none">
+                          {item.phoneNumber && (
+                            <span className="truncate font-semibold shrink-0" style={{ color: theme.promptColor }}>
+                              {item.phoneNumber}
+                            </span>
+                          )}
+                          {item.subtitle && item.subtitle !== item.phoneNumber && (
+                            <span className="truncate opacity-75">
+                              {item.phoneNumber ? `• ${item.subtitle}` : item.subtitle}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col min-w-0 flex-1 justify-center gap-0.5 overflow-hidden">
+                        <span
+                          className="font-bold truncate text-xs leading-none"
+                          style={{ color: isSelected ? theme.accentColor : theme.fg }}
+                        >
+                          {item.label}
                         </span>
-                      )}
-                    </div>
+                        {item.subtitle && (
+                          <span className="text-[10px] opacity-65 truncate font-mono leading-none">
+                            {item.subtitle}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* Right side quick action buttons */}
-                  <div className="flex items-center gap-1 shrink-0 ml-2">
+                  <div className="flex items-center gap-1 shrink-0 ml-1.5">
                     {isApp && item.appObj && (
                       <button
                         type="button"
@@ -1289,14 +1395,14 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           e.stopPropagation();
                           directExecute(item.fullReplacement || `sms "${item.label}" `);
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 ml-2 whitespace-nowrap"
+                        className="px-2.5 py-1 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 whitespace-nowrap"
                         style={{
                           backgroundColor: '#8b5cf625',
                           borderColor: '#8b5cf6',
                           color: '#a78bfa',
                         }}
                       >
-                        <MessageSquare size={9} />
+                        <MessageSquare size={10} />
                         <span>SMS</span>
                       </button>
                     )}
@@ -1309,14 +1415,14 @@ export const CommandLine: React.FC<CommandLineProps> = ({
                           e.stopPropagation();
                           directExecute(item.fullReplacement || `call ${item.phoneNumber || item.label}`);
                         }}
-                        className="px-2 py-0.5 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 ml-2 whitespace-nowrap"
+                        className="px-2.5 py-1 rounded text-[10px] font-bold flex items-center gap-1 border hover:scale-105 active:scale-95 transition-all shrink-0 whitespace-nowrap"
                         style={{
                           backgroundColor: `${theme.successColor}25`,
                           borderColor: theme.successColor,
                           color: theme.successColor,
                         }}
                       >
-                        <PhoneCall size={9} />
+                        <PhoneCall size={10} />
                         <span>Call</span>
                       </button>
                     )}
