@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js (Node 22 LTS)
         uses: actions/setup-node@v4
@@ -48,20 +50,20 @@ jobs:
             python3 -c "import xml.etree.ElementTree as ET; ET.parse('$MANIFEST'); print('AndroidManifest.xml is valid XML')"
           fi
 
-      - name: Patch Kotlin stdlib resolution
+      - name: Verify Persistent Keystore
         run: |
-          # Ensure no duplicate kotlin-stdlib classes between 1.8+ and legacy jdk7/jdk8
-          cat << 'EOF' >> android/app/build.gradle
-
-          configurations.all {
-              resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-                  if (details.requested.group == 'org.jetbrains.kotlin' && 
-                     (details.requested.name == 'kotlin-stdlib-jdk7' || details.requested.name == 'kotlin-stdlib-jdk8')) {
-                      details.useVersion '1.8.22'
-                  }
-              }
-          }
-          EOF
+          # Ensure persistent keystore exists for reproducible build signatures
+          if [ ! -f "android/app/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore android/app/debug.keystore \
+              -storepass android \
+              -alias androiddebugkey \
+              -keypass android \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
 
       - name: Build Android APK with Gradle
         run: |

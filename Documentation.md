@@ -292,6 +292,13 @@ tui_launcher/
   - **Registered In**: `AndroidManifest.xml` under service with permission `BIND_NOTIFICATION_LISTENER_SERVICE`.
   - **Collaborates With**: `AppLauncherPlugin.java` notification broadcast receiver.
 
+#### `android/app/build.gradle` & `android/app/debug.keystore`
+- **Purpose**: Gradle build configuration and permanent signing keystore ensuring reproducible, collision-free APK builds.
+- **Key Capabilities**:
+  - `computeVersionCode()`: Automatically calculates ever-increasing `versionCode` based on git commit count (`git rev-list --count HEAD`) with manual override support via `-PcustomVersionCode=`.
+  - `signingConfigs.debug` & `signingConfigs.release`: Links builds to the persistent `debug.keystore` (valid until 2054) so that local builds, CI builds, and re-compilations share the exact same signature certificate.
+  - **Prevents Package Conflicts**: Fixes Android's `INSTALL_FAILED_UPDATE_INCOMPATIBLE` ("App not installed as package conflicts with an existing package") when updating an existing installation after code edits.
+
 ---
 
 ### 3.4 Main Interface Views & Tabs
