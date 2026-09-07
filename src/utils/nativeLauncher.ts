@@ -236,7 +236,7 @@ export async function launchNativeAndroidApp(
         return {
           success: true,
           method: 'native_plugin',
-          message: `Launched ${app.name || pkg} natively on Android OS`,
+          message: `Launched ${app.name || pkg}. `,
         };
       }
     } catch (err: any) {

@@ -413,7 +413,7 @@ Tip: You can also type the app name directly (e.g. 'camera') or type 'open ' for
           ctx.openAppModal(found);
           return {
             type: 'success',
-            content: `[✓] Launching ${found.name} (${found.packageName})...`,
+            content: `[✓] Launching ${found.name} ...`,
             metadata: {
               action: 'open_app',
               app: found,
