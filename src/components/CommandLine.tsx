@@ -39,9 +39,9 @@ function formatTimeAgo(ts: number): string {
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'Just now';
   if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 3600000);
+  const hrs = Math.floor(diff / 3600000);
   if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 86400000);
+  const days = Math.floor(diff / 86400000);
   return `${days}d ago`;
 }
 
@@ -128,6 +128,24 @@ function buildContactSuggestions({
     return nameMatch || phoneMatch;
   });
 
+  if (query) {
+    matchingRecent.sort((a, b) => {
+      const aName = (a.name || '').toLowerCase();
+      const bName = (b.name || '').toLowerCase();
+      const aStarts = aName.startsWith(query);
+      const bStarts = bName.startsWith(query);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      const aWord = aName.split(/\s+/).some((w) => w.startsWith(query));
+      const bWord = bName.split(/\s+/).some((w) => w.startsWith(query));
+      if (aWord && !bWord) return -1;
+      if (!aWord && bWord) return 1;
+
+      return b.timestamp - a.timestamp;
+    });
+  }
+
   // 4. Add recent called contacts to suggestions FIRST
   matchingRecent.forEach((rc) => {
     const dirMatch = (contacts || []).find((c) =>
@@ -191,6 +209,24 @@ function buildContactSuggestions({
     const emailMatch = (c.email || '').toLowerCase().includes(query);
     return nameMatch || phoneMatch || emailMatch;
   });
+
+  if (query) {
+    matchingDir.sort((a, b) => {
+      const aName = a.name.toLowerCase();
+      const bName = b.name.toLowerCase();
+      const aStarts = aName.startsWith(query);
+      const bStarts = bName.startsWith(query);
+      if (aStarts && !bStarts) return -1;
+      if (!aStarts && bStarts) return 1;
+
+      const aWord = aName.split(/\s+/).some((w) => w.startsWith(query));
+      const bWord = bName.split(/\s+/).some((w) => w.startsWith(query));
+      if (aWord && !bWord) return -1;
+      if (!aWord && bWord) return 1;
+
+      return a.name.localeCompare(b.name);
+    });
+  }
 
   matchingDir.forEach((c) => {
     const subtitle = c.email && !c.email.includes('@example.com') ? c.email : 'Phone Directory';

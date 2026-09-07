@@ -914,7 +914,7 @@ public class AppLauncherPlugin extends Plugin {
 
             if (cursor != null) {
                 Set<String> seenNumbers = new java.util.HashSet<>();
-                while (cursor.moveToNext() && contactsArr.length() < 100) {
+                while (cursor.moveToNext() && contactsArr.length() < 10000) {
                     String id = cursor.getString(0);
                     String name = cursor.getString(1);
                     String number = cursor.getString(2);
@@ -977,7 +977,7 @@ public class AppLauncherPlugin extends Plugin {
             );
 
             if (cursor != null) {
-                while (cursor.moveToNext() && callsArr.length() < 50) {
+                while (cursor.moveToNext() && callsArr.length() < 100) {
                     String id = cursor.getString(0);
                     String name = cursor.getString(1);
                     String number = cursor.getString(2);

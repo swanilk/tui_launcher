@@ -433,9 +433,13 @@ export default function App() {
       getDeviceContacts().then((devContacts) => {
         if (devContacts && devContacts.length > 0) {
           setContacts((prev) => {
-            const existingPhones = new Set(prev.map((c) => c.phone.replace(/\D/g, '')));
-            const newOnes = devContacts.filter((c) => !existingPhones.has(c.phone.replace(/\D/g, '')));
-            return [...prev, ...newOnes];
+            const devPhones = new Set(devContacts.map((c) => c.phone.replace(/\D/g, '')));
+            // Preserve manually added custom contacts not in Android contacts
+            const customOnly = prev.filter((c) => {
+              const clean = (c.phone || '').replace(/\D/g, '');
+              return clean.length > 0 ? !devPhones.has(clean) : true;
+            });
+            return [...devContacts, ...customOnly];
           });
         }
       }).catch(() => {});
@@ -446,7 +450,7 @@ export default function App() {
             const existingIds = new Set(prev.map((r) => `${r.phone.replace(/\D/g, '')}-${r.timestamp}`));
             const newOnes = devCalls.filter((r) => !existingIds.has(`${r.phone.replace(/\D/g, '')}-${r.timestamp}`));
             const merged = [...newOnes, ...prev].sort((a, b) => b.timestamp - a.timestamp);
-            return merged.slice(0, 50);
+            return merged.slice(0, 100);
           });
         }
       }).catch(() => {});
