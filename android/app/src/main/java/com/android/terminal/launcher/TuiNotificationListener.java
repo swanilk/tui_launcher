@@ -17,6 +17,7 @@ public class TuiNotificationListener extends NotificationListenerService {
     public interface NotificationCallback {
         void onNotificationPosted(JSObject notif);
         void onNotificationRemoved(String id);
+        void onNotificationsRefreshed(JSArray notifs);
     }
 
     private static TuiNotificationListener instance;
@@ -42,6 +43,9 @@ public class TuiNotificationListener extends NotificationListenerService {
         super.onListenerConnected();
         instance = this;
         refreshActiveNotifications();
+        if (callback != null) {
+            callback.onNotificationsRefreshed(getActiveNotificationsArray());
+        }
     }
 
     @Override
@@ -53,8 +57,26 @@ public class TuiNotificationListener extends NotificationListenerService {
         return instance;
     }
 
+    public static void rebind(android.content.Context context) {
+        if (context == null) return;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.N) {
+            try {
+                requestRebind(new android.content.ComponentName(context, TuiNotificationListener.class));
+            } catch (Exception ignored) {}
+        }
+        try {
+            PackageManager pm = context.getPackageManager();
+            android.content.ComponentName cn = new android.content.ComponentName(context, TuiNotificationListener.class);
+            pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_DISABLED, PackageManager.DONT_KILL_APP);
+            pm.setComponentEnabledSetting(cn, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP);
+        } catch (Exception ignored) {}
+    }
+
     public static void setCallback(NotificationCallback cb) {
         callback = cb;
+        if (callback != null && instance != null) {
+            callback.onNotificationsRefreshed(getActiveNotificationsArray());
+        }
     }
 
     public static JSArray getActiveNotificationsArray() {
@@ -109,17 +131,24 @@ public class TuiNotificationListener extends NotificationListenerService {
             if (titleChar == null && extras != null) {
                 titleChar = extras.getCharSequence(Notification.EXTRA_TITLE_BIG);
             }
+            if (titleChar == null && extras != null) {
+                titleChar = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE);
+            }
             CharSequence textChar = extras != null ? extras.getCharSequence(Notification.EXTRA_TEXT) : null;
             if (textChar == null && extras != null) {
                 textChar = extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
             }
-
-            String title = titleChar != null ? titleChar.toString().trim() : "";
-            String message = textChar != null ? textChar.toString().trim() : "";
-
-            // Ignore empty notifications
-            if (title.isEmpty() && message.isEmpty()) {
-                return;
+            if (textChar == null && extras != null) {
+                CharSequence[] lines = extras.getCharSequenceArray(Notification.EXTRA_TEXT_LINES);
+                if (lines != null && lines.length > 0) {
+                    textChar = lines[lines.length - 1];
+                }
+            }
+            if (textChar == null && extras != null) {
+                textChar = extras.getCharSequence(Notification.EXTRA_SUB_TEXT);
+            }
+            if (textChar == null && notification.tickerText != null) {
+                textChar = notification.tickerText;
             }
 
             PackageManager pm = getPackageManager();
@@ -128,6 +157,18 @@ public class TuiNotificationListener extends NotificationListenerService {
                 ApplicationInfo ai = pm.getApplicationInfo(packageName, 0);
                 appName = pm.getApplicationLabel(ai).toString();
             } catch (Exception ignored) {}
+
+            String title = titleChar != null ? titleChar.toString().trim() : "";
+            String message = textChar != null ? textChar.toString().trim() : "";
+
+            if (title.isEmpty() && !message.isEmpty()) {
+                title = appName;
+            } else if (message.isEmpty() && !title.isEmpty()) {
+                message = title;
+                title = appName;
+            } else if (title.isEmpty() && message.isEmpty()) {
+                return;
+            }
 
             String lowerPkg = packageName.toLowerCase();
             String lowerTitle = title.toLowerCase();

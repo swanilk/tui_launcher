@@ -68,6 +68,7 @@ export interface CommandContext {
   batteryData?: BatteryTelemetry;
   wifiSsid: string;
   syncNativeApps?: () => Promise<{ success: boolean; count: number; message: string }>;
+  isNotificationAccessGranted?: boolean;
 }
 
 export interface CommandResult {
@@ -1586,6 +1587,7 @@ Commands:
       content: `Active Notifications (${ctx.notifications.length} total)`,
       metadata: {
         notifications: ctx.notifications,
+        accessDenied: ctx.isNotificationAccessGranted === false,
       },
     };
   }

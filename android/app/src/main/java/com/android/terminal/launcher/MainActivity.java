@@ -15,12 +15,18 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(AppLauncherPlugin.class);
         super.onCreate(savedInstanceState);
         setupImmersiveGestureMode();
+        TuiNotificationListener.rebind(this);
     }
 
     @Override
     public void onResume() {
         super.onResume();
         setupImmersiveGestureMode();
+        if (TuiNotificationListener.getInstance() == null) {
+            TuiNotificationListener.rebind(this);
+        } else {
+            TuiNotificationListener.getInstance().refreshActiveNotifications();
+        }
     }
 
     @Override

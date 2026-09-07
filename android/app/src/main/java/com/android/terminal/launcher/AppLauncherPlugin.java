@@ -811,6 +811,7 @@ public class AppLauncherPlugin extends Plugin {
     @Override
     public void load() {
         super.load();
+        TuiNotificationListener.rebind(getContext());
         TuiNotificationListener.setCallback(new TuiNotificationListener.NotificationCallback() {
             @Override
             public void onNotificationPosted(JSObject notif) {
@@ -823,24 +824,44 @@ public class AppLauncherPlugin extends Plugin {
                 data.put("id", id);
                 notifyListeners("notificationRemoved", data);
             }
+
+            @Override
+            public void onNotificationsRefreshed(JSArray notifs) {
+                JSObject data = new JSObject();
+                data.put("notifications", notifs);
+                notifyListeners("notificationsRefreshed", data);
+            }
         });
     }
 
     @PluginMethod
     public void getActiveNotifications(PluginCall call) {
-        try {
-            if (TuiNotificationListener.getInstance() != null) {
-                TuiNotificationListener.getInstance().refreshActiveNotifications();
+        new Thread(() -> {
+            try {
+                if (TuiNotificationListener.getInstance() == null) {
+                    TuiNotificationListener.rebind(getContext());
+                    for (int i = 0; i < 5; i++) {
+                        try {
+                            Thread.sleep(100);
+                        } catch (InterruptedException ignored) {}
+                        if (TuiNotificationListener.getInstance() != null) break;
+                    }
+                }
+
+                if (TuiNotificationListener.getInstance() != null) {
+                    TuiNotificationListener.getInstance().refreshActiveNotifications();
+                }
+
+                JSArray notifs = TuiNotificationListener.getActiveNotificationsArray();
+                JSObject ret = new JSObject();
+                ret.put("success", true);
+                ret.put("notifications", notifs);
+                ret.put("count", notifs.length());
+                call.resolve(ret);
+            } catch (Exception e) {
+                call.reject("Could not get notifications: " + e.getMessage());
             }
-            JSArray notifs = TuiNotificationListener.getActiveNotificationsArray();
-            JSObject ret = new JSObject();
-            ret.put("success", true);
-            ret.put("notifications", notifs);
-            ret.put("count", notifs.length());
-            call.resolve(ret);
-        } catch (Exception e) {
-            call.reject("Could not get notifications: " + e.getMessage());
-        }
+        }).start();
     }
 
     @PluginMethod
@@ -848,6 +869,10 @@ public class AppLauncherPlugin extends Plugin {
         try {
             Set<String> packages = NotificationManagerCompat.getEnabledListenerPackages(getContext());
             boolean granted = packages != null && packages.contains(getContext().getPackageName());
+            if (!granted) {
+                String flat = Settings.Secure.getString(getContext().getContentResolver(), "enabled_notification_listeners");
+                granted = flat != null && flat.contains(getContext().getPackageName());
+            }
             JSObject ret = new JSObject();
             ret.put("granted", granted);
             call.resolve(ret);

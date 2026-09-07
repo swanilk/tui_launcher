@@ -56,6 +56,7 @@ export interface AppLauncherPluginInterface {
   dismissNotification?(options: { id: string }): Promise<{ success: boolean }>;
   addListener?(eventName: 'notificationPosted', listenerFunc: (notification: AppNotification) => void): Promise<any>;
   addListener?(eventName: 'notificationRemoved', listenerFunc: (data: { id: string }) => void): Promise<any>;
+  addListener?(eventName: 'notificationsRefreshed', listenerFunc: (data: { notifications: AppNotification[] }) => void): Promise<any>;
 }
 
 export const AppLauncher = registerPlugin<AppLauncherPluginInterface>('AppLauncher');
@@ -900,7 +901,8 @@ export async function dismissNativeNotification(id: string): Promise<boolean> {
  */
 export function subscribeToNativeNotifications(
   onPosted: (notif: AppNotification) => void,
-  onRemoved: (id: string) => void
+  onRemoved: (id: string) => void,
+  onRefreshed?: (notifs: AppNotification[]) => void
 ): () => void {
   if (!isNativeAndroidApp() || !AppLauncher.addListener) {
     return () => {};
@@ -908,22 +910,34 @@ export function subscribeToNativeNotifications(
 
   let subPosted: any = null;
   let subRemoved: any = null;
+  let subRefreshed: any = null;
 
   AppLauncher.addListener('notificationPosted', (notif: AppNotification) => {
     if (notif) onPosted(notif);
-  }).then((handle) => {
+  }).then((handle: any) => {
     subPosted = handle;
   }).catch(() => {});
 
   AppLauncher.addListener('notificationRemoved', (data: { id: string }) => {
     if (data && data.id) onRemoved(data.id);
-  }).then((handle) => {
+  }).then((handle: any) => {
     subRemoved = handle;
   }).catch(() => {});
+
+  if (onRefreshed) {
+    AppLauncher.addListener('notificationsRefreshed', (data: { notifications: AppNotification[] }) => {
+      if (data && Array.isArray(data.notifications)) {
+        onRefreshed(data.notifications);
+      }
+    }).then((handle: any) => {
+      subRefreshed = handle;
+    }).catch(() => {});
+  }
 
   return () => {
     if (subPosted && typeof subPosted.remove === 'function') subPosted.remove();
     if (subRemoved && typeof subRemoved.remove === 'function') subRemoved.remove();
+    if (subRefreshed && typeof subRefreshed.remove === 'function') subRefreshed.remove();
   };
 }
 

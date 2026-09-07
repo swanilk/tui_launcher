@@ -306,6 +306,11 @@ export default function App() {
         },
         (removedId) => {
           setNotifications((prev) => prev.filter((n) => n.id !== removedId));
+        },
+        (refreshedNotifs) => {
+          if (refreshedNotifs && refreshedNotifs.length > 0) {
+            setNotifications(refreshedNotifs);
+          }
         }
       );
 
@@ -313,6 +318,27 @@ export default function App() {
         unsubscribe();
       };
     }
+  }, [handleSyncNotifications]);
+
+  // Re-sync notifications when switching to notifs tab or returning from Settings
+  useEffect(() => {
+    if (activeTab === 'notifs' && isNativeAndroidApp()) {
+      handleSyncNotifications();
+    }
+  }, [activeTab, handleSyncNotifications]);
+
+  useEffect(() => {
+    const handleResume = () => {
+      if (document.visibilityState === 'visible' && isNativeAndroidApp()) {
+        handleSyncNotifications();
+      }
+    };
+    document.addEventListener('visibilitychange', handleResume);
+    window.addEventListener('focus', handleResume);
+    return () => {
+      document.removeEventListener('visibilitychange', handleResume);
+      window.removeEventListener('focus', handleResume);
+    };
   }, [handleSyncNotifications]);
 
   // 4. Persistent Aliases
@@ -784,6 +810,7 @@ Press [Tab] anytime for auto-completion.`,
         batteryData: batteryTelemetry,
         wifiSsid,
         syncNativeApps: handleSyncNativeApps,
+        isNotificationAccessGranted,
       };
 
       try {

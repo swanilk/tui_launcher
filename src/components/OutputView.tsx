@@ -424,13 +424,14 @@ export const OutputView: React.FC<OutputViewProps> = ({
 
       case 'notifications_grouped': {
         const rawNotifs: AppNotification[] = line.metadata?.notifications || [];
+        const isAccessDenied = Boolean(line.metadata?.accessDenied);
         if (rawNotifs.length === 0) {
           return (
             <div
               className="p-3 rounded border my-1 text-xs md:text-sm font-mono"
               style={{
                 backgroundColor: theme.cardBg,
-                borderColor: theme.borderColor,
+                borderColor: isAccessDenied ? '#f59e0b' : theme.borderColor,
                 color: theme.fg,
               }}
             >
@@ -438,6 +439,20 @@ export const OutputView: React.FC<OutputViewProps> = ({
                 <Bell size={14} />
                 <span>No active app notifications in the notification shade.</span>
               </div>
+              {isAccessDenied && (
+                <div
+                  className="mt-2.5 pt-2 border-t text-xs flex flex-col gap-1 text-amber-400"
+                  style={{ borderColor: '#f59e0b40' }}
+                >
+                  <span className="font-bold">⚠️ Android Notification Access is not granted for TUI Launcher.</span>
+                  <span className="opacity-90">
+                    Enable it in <strong>Settings &gt; Apps &gt; Special app access &gt; Notification access</strong> to capture WhatsApp, SMS, and Call alerts.
+                  </span>
+                  <span className="text-[11px] opacity-75">
+                    (Note for Android 13+: If the toggle is greyed out with 'Restricted setting', open <strong>App Info &gt; 3 dots (top-right) &gt; Allow restricted settings</strong> first).
+                  </span>
+                </div>
+              )}
             </div>
           );
         }
